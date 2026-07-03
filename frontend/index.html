@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Tower Monitoring Platform</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- Namespace bootstrap: must come before any page scripts -->
+  <script>var Pages = {}; var Live = { socket: null, connect: function(){} };</script>
+
+  <!-- Core -->
+  <script src="js/api.js"></script>
+  <script src="js/ws.js"></script>
+  <script src="js/charts.js"></script>
+
+  <!-- Pages (must load before app.js references Pages.*) -->
+  <script src="js/pages/landing.js"></script>
+  <script src="js/pages/login.js"></script>
+  <script src="js/pages/dashboard.js"></script>
+  <script src="js/pages/siteDetail.js"></script>
+  <script src="js/pages/alerts.js"></script>
+  <script src="js/pages/tenancy.js"></script>
+  <script src="js/pages/reports.js"></script>
+
+  <!-- Shell + router (last: wires everything up) -->
+  <script src="js/app.js"></script>
+</body>
+</html>

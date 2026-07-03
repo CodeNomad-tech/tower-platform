@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "author": "Smart Tower Monitoring Platform",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp32", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-dht22", "id": "dht22", "top": -80, "left": 150, "attrs": {} },
+    { "type": "wokwi-pir-motion-sensor", "id": "pir1", "top": -80, "left": 250, "attrs": {} },
+    { "type": "wokwi-potentiometer", "id": "fuel_pot", "top": 80, "left": 150, "attrs": { "value": "70" } },
+    { "type": "wokwi-slide-switch", "id": "door_switch", "top": 80, "left": 250, "attrs": {} },
+    { "type": "wokwi-led", "id": "generator_led", "top": 150, "left": 150, "attrs": { "color": "yellow" } },
+    { "type": "wokwi-resistor", "id": "r1", "top": 150, "left": 200, "attrs": { "value": "220" } }
+  ],
+  "connections": [
+    [ "esp32:D4", "dht22:SDA", "black", [] ],
+    [ "dht22:VCC", "esp32:3V3", "red", [] ],
+    [ "dht22:GND", "esp32:GND.1", "black", [] ],
+
+    [ "esp32:D5", "pir1:OUT", "black", [] ],
+    [ "pir1:VCC", "esp32:3V3", "red", [] ],
+    [ "pir1:GND", "esp32:GND.2", "black", [] ],
+
+    [ "esp32:D34", "fuel_pot:SIG", "green", [] ],
+    [ "fuel_pot:VCC", "esp32:3V3", "red", [] ],
+    [ "fuel_pot:GND", "esp32:GND.3", "black", [] ],
+
+    [ "esp32:D18", "door_switch:1", "black", [] ],
+    [ "door_switch:2", "esp32:GND.1", "black", [] ],
+
+    [ "esp32:D19", "r1:1", "black", [] ],
+    [ "r1:2", "generator_led:A", "black", [] ],
+    [ "generator_led:C", "esp32:GND.2", "black", [] ]
+  ],
+  "dependencies": {}
+}

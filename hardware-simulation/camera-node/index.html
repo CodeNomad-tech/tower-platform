@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tower Camera Node</title>
+<style>
+  body { margin:0; background:#0b0f14; color:#e8edf4; font-family:-apple-system,sans-serif; }
+  .wrap { max-width:480px; margin:0 auto; padding:16px; }
+  h1 { font-size:16px; margin-bottom:4px; }
+  p.sub { color:#8b98ab; font-size:13px; margin-top:0; }
+  video, canvas { width:100%; border-radius:10px; background:#000; }
+  .video-stack { position:relative; }
+  canvas.overlay { position:absolute; top:0; left:0; }
+  .controls { margin:14px 0; display:flex; gap:8px; flex-wrap:wrap; }
+  select, button { background:#161d29; color:#e8edf4; border:1px solid #26303f; padding:8px 12px; border-radius:6px; font-size:13px; }
+  button.active { background:#3ea6ff; color:#06121e; font-weight:600; }
+  .status { margin-top:14px; padding:12px; background:#161d29; border-radius:10px; font-size:13px; }
+  .status b { color:#34d399; }
+  .status.detecting b { color:#f87171; }
+  .log { margin-top:10px; font-size:11px; color:#5a6678; max-height:120px; overflow-y:auto; font-family:monospace; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Tower Camera Node</h1>
+  <p class="sub">Real camera feed + on-device motion detection, publishing genuine events to the platform.</p>
+
+  <div class="controls">
+    <select id="site-select">
+      <option value="site-001">Lusaka Central Tower</option>
+      <option value="site-002">Ndola Industrial Site</option>
+      <option value="site-003">Livingstone Border Relay</option>
+      <option value="site-004">Kitwe Highway Node</option>
+    </select>
+    <button id="start-btn">Start camera</button>
+  </div>
+
+  <div class="video-stack">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="overlay" class="overlay"></canvas>
+  </div>
+  <canvas id="process-canvas" style="display:none;"></canvas>
+
+  <div class="status" id="status">Camera not started.</div>
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+/**
+ * Camera node — real getUserMedia video, with a zero-dependency
+ * frame-differencing motion detector running entirely on-device (no
+ * internet required beyond loading this page). This is the default,
+ * always-on detector.
+ *
+ * Optional enhancement: if a TensorFlow.js CDN is reachable, this page
+ * can additionally run COCO-SSD person detection for higher-confidence
+ * "intrusion" events (vs. generic "motion"). See docs/HARDWARE_SIMULATION.md
+ * for how to enable it — omitted from the default path so this page works
+ * fully offline.
+ */
+
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const processCanvas = document.getElementById('process-canvas');
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+const startBtn = document.getElementById('start-btn');
+const siteSelect = document.getElementById('site-select');
+
+let ws;
+let prevFrame = null;
+let running = false;
+let cooldownUntil = 0;
+
+function log(msg) {
+  const line = document.createElement('div');
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  logEl.prepend(line);
+}
+
+function connectWs() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => log('Connected to platform');
+  ws.onclose = () => { log('Disconnected — retrying in 2s'); setTimeout(connectWs, 2000); };
+}
+
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+    video.srcObject = stream;
+    await video.play();
+    overlay.width = processCanvas.width = video.videoWidth || 320;
+    overlay.height = processCanvas.height = video.videoHeight || 240;
+    running = true;
+    statusEl.textContent = 'Camera live — monitoring for motion.';
+    startBtn.textContent = 'Stop camera';
+    requestAnimationFrame(detectLoop);
+  } catch (err) {
+    statusEl.textContent = 'Camera access denied or unavailable: ' + err.message;
+  }
+}
+
+function stopCamera() {
+  running = false;
+  const stream = video.srcObject;
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  video.srcObject = null;
+  statusEl.textContent = 'Camera stopped.';
+  startBtn.textContent = 'Start camera';
+}
+
+function detectLoop() {
+  if (!running) return;
+  const ctx = processCanvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, processCanvas.width, processCanvas.height);
+  const frame = ctx.getImageData(0, 0, processCanvas.width, processCanvas.height);
+
+  if (prevFrame) {
+    const { changedPct, bbox } = frameDiff(prevFrame, frame);
+    drawOverlay(bbox, changedPct);
+
+    if (changedPct > 0.04 && Date.now() > cooldownUntil) { // ~4% of pixels changed = real motion, not sensor noise
+      cooldownUntil = Date.now() + 8000; // debounce: avoid spamming events for one continuous motion
+      publishEvent('motion', Math.min(0.99, 0.5 + changedPct * 5));
+    }
+  }
+  prevFrame = frame;
+  requestAnimationFrame(detectLoop);
+}
+
+function frameDiff(a, b) {
+  const w = processCanvas.width, h = processCanvas.height;
+  let changed = 0;
+  let minX = w, minY = h, maxX = 0, maxY = 0;
+  const step = 4; // sample every 4th pixel for performance
+  for (let y = 0; y < h; y += step) {
+    for (let x = 0; x < w; x += step) {
+      const i = (y * w + x) * 4;
+      const dr = Math.abs(a.data[i] - b.data[i]);
+      const dg = Math.abs(a.data[i + 1] - b.data[i + 1]);
+      const db = Math.abs(a.data[i + 2] - b.data[i + 2]);
+      if (dr + dg + db > 60) {
+        changed++;
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
+    }
+  }
+  const totalSamples = (w / step) * (h / step);
+  return {
+    changedPct: changed / totalSamples,
+    bbox: changed > 4 ? { x: minX, y: minY, w: maxX - minX, h: maxY - minY } : null,
+  };
+}
+
+function drawOverlay(bbox, changedPct) {
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  if (bbox) {
+    ctx.strokeStyle = '#f87171';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bbox.x, bbox.y, bbox.w || 4, bbox.h || 4);
+  }
+  statusEl.classList.toggle('detecting', changedPct > 0.04);
+  statusEl.innerHTML = changedPct > 0.04
+    ? `<b>Motion detected</b> — ${(changedPct * 100).toFixed(1)}% of frame changed`
+    : `Monitoring — ${(changedPct * 100).toFixed(1)}% frame delta`;
+}
+
+function publishEvent(eventType, confidence) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) { log('Not connected — event dropped'); return; }
+  const siteId = siteSelect.value;
+  ws.send(JSON.stringify({ type: 'camera-event', siteId, event_type: eventType, confidence }));
+  log(`Published "${eventType}" for ${siteId} (confidence ${confidence.toFixed(2)})`);
+}
+
+startBtn.addEventListener('click', () => { running ? stopCamera() : startCamera(); });
+connectWs();
+</script>
+</body>
+</html>
