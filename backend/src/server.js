@@ -82,15 +82,32 @@ async function main() {
 
   // --- MQTT broker (device <-> server) ---
   const broker = new MqttBroker({ port: MQTT_PORT });
-  await broker.listen();
-  console.log(`[mqtt] broker listening on :${MQTT_PORT}`);
+  let mqttEnabled = false;
+  try {
+    broker.server.on('error', (e) => { /* swallow server errors here; handled below in catch */ });
+    await broker.listen();
+    mqttEnabled = true;
+    console.log(`[mqtt] broker listening on :${MQTT_PORT}`);
+  } catch (e) {
+    console.warn(`[mqtt] could not start broker on :${MQTT_PORT} — ${e.message}. Continuing without embedded broker.`);
+  }
 
   const wsHub = new WsHub();
 
-  const ingestClient = new MqttClient({ port: MQTT_PORT, clientId: 'ingest-service' });
-  await ingestClient.connect();
-  startIngest(ingestClient, wsHub);
-  console.log('[ingest] subscribed to telemetry topics');
+  let ingestClient = null;
+  if (mqttEnabled) {
+    try {
+      ingestClient = new MqttClient({ port: MQTT_PORT, clientId: 'ingest-service' });
+      await ingestClient.connect();
+      startIngest(ingestClient, wsHub);
+      console.log('[ingest] subscribed to telemetry topics');
+    } catch (e) {
+      console.warn(`[ingest] could not start MQTT ingest client: ${e.message}`);
+      ingestClient = null;
+    }
+  } else {
+    console.warn('[ingest] MQTT disabled; skipping ingest client');
+  }
 
   // --- Inbound WebSocket messages (browser camera nodes can't speak raw
   // MQTT/TCP, so they publish detection events over the same WebSocket
@@ -101,6 +118,7 @@ async function main() {
     let msg;
     try { msg = JSON.parse(text); } catch { return; }
     if (msg.type === 'camera-event' && msg.siteId && msg.event_type) {
+      if (!ingestClient) return; // MQTT not available in this run
       ingestClient.publish(`sites/${msg.siteId}/security`, JSON.stringify({
         event_type: msg.event_type,
         source: 'camera',
