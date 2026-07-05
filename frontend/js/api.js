@@ -1,5 +1,6 @@
 // API client — thin fetch wrapper with auth token and JSON handling.
-const API_BASE = '/api';
+const API_ORIGIN = window.API_ORIGIN || 'http://localhost:3000';
+const API_BASE = `${API_ORIGIN}/api`;
 
 const Api = {
   token: localStorage.getItem('tp_token') || null,

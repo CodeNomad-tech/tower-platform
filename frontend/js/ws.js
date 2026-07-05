@@ -1,13 +1,14 @@
 // WebSocket client — connects to the backend's live event stream and
 // fans events out to any registered listeners (dashboard, alerts, etc).
-const Live = {
+window.Live = {
   socket: null,
   listeners: new Set(),
   connected: false,
 
   connect() {
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    this.socket = new WebSocket(`${proto}://${window.location.host}/ws`);
+    if (this.socket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(this.socket.readyState)) return;
+    const wsOrigin = (window.API_ORIGIN || 'http://localhost:3000').replace(/^http/, 'ws');
+    this.socket = new WebSocket(`${wsOrigin}/ws`);
 
     this.socket.onopen = () => {
       this.connected = true;
@@ -15,6 +16,7 @@ const Live = {
     };
     this.socket.onclose = () => {
       this.connected = false;
+      this.socket = null;
       this._notifyConn(false);
       setTimeout(() => this.connect(), 2000); // auto-reconnect
     };
@@ -31,7 +33,9 @@ const Live = {
   _notifyConn(state) {
     const el = document.getElementById('conn-badge');
     if (!el) return;
-    el.classList.toggle('live', state);
-    el.querySelector('span').textContent = state ? 'Live' : 'Reconnecting…';
+    const dot = el.querySelector('.conn-dot');
+    if (dot) dot.classList.toggle('live', state);
+    const label = el.querySelector('[data-conn-label]');
+    if (label) label.textContent = state ? 'Live' : 'Reconnecting...';
   },
 };

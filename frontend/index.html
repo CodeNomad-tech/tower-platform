@@ -10,7 +10,7 @@
   <div id="root"></div>
 
   <!-- Namespace bootstrap: must come before any page scripts -->
-  <script>var Pages = {}; var Live = { socket: null, connect: function(){} };</script>
+  <script>window.Pages = window.Pages || {}; window.Live = window.Live || { socket: null, connect: function(){} };</script>
 
   <!-- Core -->
   <script src="js/api.js"></script>
@@ -24,6 +24,7 @@
   <script src="js/pages/siteDetail.js"></script>
   <script src="js/pages/alerts.js"></script>
   <script src="js/pages/tenancy.js"></script>
+  <script src="js/pages/aiFilter.js"></script>
   <script src="js/pages/reports.js"></script>
 
   <!-- Shell + router (last: wires everything up) -->

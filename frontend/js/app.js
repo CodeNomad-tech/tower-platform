@@ -7,6 +7,7 @@ const App = {
     '/site/:id': (params) => Pages.siteDetail(params.id),
     '/alerts': () => Pages.alerts(),
     '/tenancy': () => Pages.tenancy(),
+    '/ai-filter': () => Pages.aiFilter(),
     '/reports': () => Pages.reports(),
   },
 
@@ -14,6 +15,7 @@ const App = {
     { path: '/', label: 'Dashboard', icon: '&#9679;' },
     { path: '/alerts', label: 'Alerts', icon: '&#9888;' },
     { path: '/tenancy', label: 'Tenancy', icon: '&#127959;' },
+    { path: '/ai-filter', label: 'AI FILTER', icon: '&#129302;' },
     { path: '/reports', label: 'Reports', icon: '&#128202;' },
   ],
 
@@ -65,6 +67,7 @@ const App = {
     root.innerHTML = this.shellHtml();
     this.highlightNav();
     if (!Live.socket) Live.connect();
+    else Live._notifyConn(Live.connected);
     await found.handler(found.params);
   },
 
@@ -87,7 +90,7 @@ const App = {
         <div class="main">
           <div class="topbar">
             <h1 id="page-title">Dashboard</h1>
-            <div id="conn-badge" class="conn-badge"><span class="conn-dot"></span><span>Connecting…</span></div>
+            <div id="conn-badge" class="conn-badge"><span class="conn-dot"></span><span data-conn-label>Connecting...</span></div>
           </div>
           <div class="content" id="page"></div>
         </div>
@@ -114,5 +117,3 @@ const App = {
 };
 
 document.addEventListener('DOMContentLoaded', () => App.init());
-
-

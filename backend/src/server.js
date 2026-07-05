@@ -20,6 +20,7 @@ const alertsRoutes = require('./http/routes/alerts');
 const tenancyRoutes = require('./http/routes/tenancy');
 const reportsRoutes = require('./http/routes/reports');
 const slaRoutes = require('./http/routes/sla');
+const aiRoutes = require('./http/routes/ai');
 
 const HTTP_PORT = Number(process.env.PORT) || 3000;
 const MQTT_PORT = Number(process.env.MQTT_PORT) || 1883;
@@ -33,6 +34,7 @@ api.use('/alerts', alertsRoutes);
 api.use('/tenancy', tenancyRoutes);
 api.use('/reports', reportsRoutes);
 api.use('/sla', slaRoutes);
+api.use('/ai', aiRoutes);
 
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',

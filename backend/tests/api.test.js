@@ -100,6 +100,22 @@ test('alerts: acknowledge and resolve lifecycle persists', async () => {
   assert.equal(resolved.alert.status, 'resolved');
 });
 
+test('AI endpoints expose fleet intelligence and anomalies', async () => {
+  const fleetRes = await fetch(`${BASE}/ai/fleet-summary`, { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(fleetRes.status, 200);
+  const fleet = await fleetRes.json();
+  assert.ok(fleet.narrative);
+  assert.equal(fleet.sites.length, 4);
+  assert.ok(fleet.sites.every(site => ['LOW', 'MEDIUM', 'HIGH'].includes(site.riskLevel)));
+  assert.ok(typeof fleet.monthlyRevenue === 'number');
+
+  const anomaliesRes = await fetch(`${BASE}/ai/anomalies`, { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(anomaliesRes.status, 200);
+  const anomalies = await anomaliesRes.json();
+  assert.ok(Array.isArray(anomalies.anomalies));
+  assert.ok(anomalies.anomalies.every(a => ['FUEL_THEFT', 'PREDICTIVE_MAINTENANCE', 'SLA_BREACH'].includes(a.type)));
+});
+
 test('CSV export produces well-formed content', async () => {
   const res = await fetch(`${BASE}/reports/export/uptime.csv`, { headers: { Authorization: `Bearer ${token}` } });
   assert.equal(res.status, 200);
