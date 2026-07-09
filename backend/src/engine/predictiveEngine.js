@@ -14,6 +14,23 @@
 
 const db = require('../db');
 
+function saveMaintenanceFlag(siteId, component, trendSlope, explanation) {
+  const existing = db.get(
+    `SELECT id, explanation FROM maintenance_flags
+     WHERE site_id = ? AND component = ?
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [siteId, component]
+  );
+
+  if (existing && existing.explanation === explanation) return;
+
+  db.run(
+    `INSERT INTO maintenance_flags (site_id, component, trend_slope, explanation) VALUES (?, ?, ?, ?)`,
+    [siteId, component, trendSlope, explanation]
+  );
+}
+
 function linearRegressionSlope(points) {
   // points: [{x, y}], x in ms since first point (for numerical stability)
   const n = points.length;
@@ -61,10 +78,7 @@ function evaluateGeneratorRuntimeTrend(siteId, days = 14) {
   const dailySlope = slope * 24; // minutes of runtime change per day
   if (dailySlope > 3) { // generator runtime growing by >3 min/day on average -> flag
     const explanation = `Generator daily runtime is increasing by ~${dailySlope.toFixed(1)} min/day over the last ${days} days — may indicate declining grid/solar reliability or generator wear requiring service.`;
-    db.run(
-      `INSERT INTO maintenance_flags (site_id, component, trend_slope, explanation) VALUES (?, ?, ?, ?)`,
-      [siteId, 'generator', dailySlope, explanation]
-    );
+    saveMaintenanceFlag(siteId, 'generator', dailySlope, explanation);
     return { siteId, component: 'generator', trendSlope: dailySlope, explanation };
   }
   return null;
@@ -96,10 +110,7 @@ function evaluateFuelEfficiencyTrend(siteId, days = 14) {
   const dailySlope = slope * 24;
   if (dailySlope > 0.05) { // burn rate worsening measurably over the window
     const explanation = `Generator fuel burn rate is rising by ~${dailySlope.toFixed(3)} %/hr each day over the last ${days} days — may indicate declining generator efficiency.`;
-    db.run(
-      `INSERT INTO maintenance_flags (site_id, component, trend_slope, explanation) VALUES (?, ?, ?, ?)`,
-      [siteId, 'fuel_system', dailySlope, explanation]
-    );
+    saveMaintenanceFlag(siteId, 'fuel_system', dailySlope, explanation);
     return { siteId, component: 'fuel_system', trendSlope: dailySlope, explanation };
   }
   return null;
