@@ -76,7 +76,8 @@ function evaluateGeneratorRuntimeTrend(siteId, days = 14) {
   if (slope == null) return null;
 
   const dailySlope = slope * 24; // minutes of runtime change per day
-  if (dailySlope > 3) { // generator runtime growing by >3 min/day on average -> flag
+  // Sanity cap: >120 min/day trend is physically implausible given tick noise — skip
+  if (dailySlope > 3 && dailySlope <= 120) {
     const explanation = `Generator daily runtime is increasing by ~${dailySlope.toFixed(1)} min/day over the last ${days} days — may indicate declining grid/solar reliability or generator wear requiring service.`;
     saveMaintenanceFlag(siteId, 'generator', dailySlope, explanation);
     return { siteId, component: 'generator', trendSlope: dailySlope, explanation };
@@ -108,8 +109,9 @@ function evaluateFuelEfficiencyTrend(siteId, days = 14) {
   if (slope == null) return null;
 
   const dailySlope = slope * 24;
-  if (dailySlope > 0.05) { // burn rate worsening measurably over the window
-    const explanation = `Generator fuel burn rate is rising by ~${dailySlope.toFixed(3)} %/hr each day over the last ${days} days — may indicate declining generator efficiency.`;
+  // Sanity cap: >10 %/day trend is physically implausible given tick noise — skip
+  if (dailySlope > 0.05 && dailySlope <= 10) {
+    const explanation = `Generator fuel burn rate is rising by ~${dailySlope.toFixed(2)}%/day over the last ${days} days — may indicate declining generator efficiency.`;
     saveMaintenanceFlag(siteId, 'fuel_system', dailySlope, explanation);
     return { siteId, component: 'fuel_system', trendSlope: dailySlope, explanation };
   }

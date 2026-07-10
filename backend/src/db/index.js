@@ -5,7 +5,20 @@
 
 const path = require('node:path');
 const fs = require('node:fs');
-const { DatabaseSync } = require('node:sqlite');
+
+let DatabaseSync;
+try {
+  DatabaseSync = require('node:sqlite').DatabaseSync;
+} catch (e) {
+  const hasFlag = process.execArgv.includes('--experimental-sqlite');
+  if (!hasFlag) {
+    const { spawnSync } = require('node:child_process');
+    const args = ['--experimental-sqlite', ...process.execArgv, ...process.argv.slice(1)];
+    const result = spawnSync(process.execPath, args, { stdio: 'inherit' });
+    process.exit(result.status ?? 0);
+  }
+  throw e;
+}
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/tower_platform.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });

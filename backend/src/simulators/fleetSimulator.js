@@ -41,7 +41,7 @@ class SiteState {
     this.activeSource = 'grid';
     this.gridUp = true;
     this.tempC = 24 + Math.random() * 4;
-    this.tickCount = 0;
+    this.tickCount = 0; // resets to zero on each simulator (re)start
   }
 }
 
