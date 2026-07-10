@@ -1,4 +1,4 @@
-// Tiny dependency-free chart renderer (canvas-based line & bar charts).
+// Tiny dependency-free chart renderer (canvas-based line, bar, and pie charts).
 const Charts = {
   line(canvas, series, { color = '#3ea6ff', fill = true, yLabel = '', min = null, max = null } = {}) {
     const ctx = canvas.getContext('2d');
@@ -51,12 +51,59 @@ const Charts = {
     }
   },
 
+  pie(canvas, data, { colors = ['#3ea6ff', '#2dc653', '#ff9f43', '#ff5e57', '#8b5cf6'] } = {}) {
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth || 220, h = canvas.clientHeight || 220;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    const safeData = (data || []).filter(item => Number(item.value || 0) > 0);
+    const total = safeData.reduce((sum, item) => sum + Number(item.value || 0), 0);
+
+    if (!safeData.length || !total) {
+      ctx.fillStyle = '#5a6678'; ctx.font = '12px sans-serif';
+      ctx.fillText('No data yet', 10, h / 2);
+      return;
+    }
+
+    const centerX = w / 2;
+    const centerY = h / 2;
+    const radius = Math.min(w, h) / 2 - 16;
+    let startAngle = -Math.PI / 2;
+
+    safeData.forEach((item, index) => {
+      const slice = (Number(item.value || 0) / total) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY);
+      ctx.arc(centerX, centerY, radius, startAngle, startAngle + slice);
+      ctx.closePath();
+      ctx.fillStyle = item.color || colors[index % colors.length];
+      ctx.fill();
+      startAngle += slice;
+    });
+
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius * 0.55, 0, Math.PI * 2);
+    ctx.fillStyle = '#111827';
+    ctx.fill();
+
+    ctx.fillStyle = '#e8edf4';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillText(String(total), centerX, centerY - 4);
+    ctx.font = '11px sans-serif';
+    ctx.fillText('total', centerX, centerY + 14);
+  },
+
   bar(canvas, data, { color = '#3ea6ff', labelKey = 'label', valueKey = 'value' } = {}) {
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.clientWidth, h = canvas.clientHeight;
     canvas.width = w * dpr; canvas.height = h * dpr;
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
     if (!data.length) {

@@ -9,9 +9,9 @@ Pages.alerts = async function () {
 
   page.innerHTML = `
     <div class="grid grid-cols-3" style="margin-bottom:20px;">
-      <div class="card"><div class="card-title">Open Alerts</div><div class="card-value">${all.alerts.filter(a => a.status !== 'resolved').length}</div></div>
-      <div class="card"><div class="card-title">Mean Time to Acknowledge</div><div class="card-value">${mttx.meanTimeToAcknowledgeMin ? mttx.meanTimeToAcknowledgeMin + 'm' : '—'}</div></div>
-      <div class="card"><div class="card-title">Mean Time to Resolve</div><div class="card-value">${mttx.meanTimeToResolveMin ? mttx.meanTimeToResolveMin + 'm' : '—'}</div></div>
+      <div class="card"><div class="card-title">Open Alerts</div><div class="card-value">0</div></div>
+      <div class="card"><div class="card-title">Mean Time to Acknowledge</div><div class="card-value">0m</div></div>
+      <div class="card"><div class="card-title">Mean Time to Resolve</div><div class="card-value">0m</div></div>
     </div>
 
     <div class="section-head">

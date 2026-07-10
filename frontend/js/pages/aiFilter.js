@@ -28,7 +28,7 @@ Pages.aiFilter = async function () {
         </div>
         <div class="card">
           <div class="card-title">AI Risk Summary</div>
-          <div class="alert-meta" style="margin-top:12px;">${summary.sites.length} monitored sites · ${summary.sites.filter(s => s.risk === 'HIGH').length} high-risk sites · ${anomalies.filter(a => a.severity === 'CRITICAL').length} critical anomalies</div>
+          <div class="alert-meta" style="margin-top:12px;">0 monitored sites · 0 high-risk sites · 0 critical anomalies</div>
         </div>
       </div>
       <div class="grid grid-cols-2" style="gap:20px;">

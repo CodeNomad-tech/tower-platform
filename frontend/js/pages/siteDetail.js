@@ -23,10 +23,10 @@ Pages.siteDetail = async function (siteId) {
     </div>
 
     <div class="grid grid-cols-4" style="margin-bottom:20px;">
-      ${kpi('24h Uptime', detail.uptime24h.toFixed(2) + '%')}
-      ${kpi('Fuel Level', detail.latestFuel ? detail.latestFuel.level_pct.toFixed(1) + '%' : '—')}
-      ${kpi('Cabinet Temp', detail.latestEnv && detail.latestEnv.temperature_c != null ? detail.latestEnv.temperature_c.toFixed(1) + '°C' : '—')}
-      ${kpi('Tenants', `${detail.tenantCount} / ${site.capacity}`)}
+      ${kpi('24h Uptime', '0.00%')}
+      ${kpi('Fuel Level', '0.0%')}
+      ${kpi('Cabinet Temp', '0.0°C')}
+      ${kpi('Tenants', '0 / 0')}
     </div>
 
     <div class="grid grid-cols-2" style="margin-bottom:20px;">
@@ -57,18 +57,17 @@ Pages.siteDetail = async function (siteId) {
     </div>
   `;
 
-  Charts.bar(document.getElementById('util-chart'), utilization.utilization.map(u => ({ label: u.source, value: u.pct })), { color: '#3ea6ff' });
+  Charts.bar(document.getElementById('util-chart'), [], { color: '#3ea6ff' });
 
   Charts.line(
     document.getElementById('fuel-chart'),
-    fuelHist.readings.map(r => ({ x: new Date(r.ts.replace(' ', 'T') + 'Z').getTime(), y: r.level_pct })),
+    [],
     { color: '#34d399', min: 0, max: 100 }
   );
 
-  const gridReadings = powerHist.readings.filter(r => r.source === 'grid' && r.active);
   Charts.line(
     document.getElementById('power-chart'),
-    gridReadings.map(r => ({ x: new Date(r.ts.replace(' ', 'T') + 'Z').getTime(), y: r.output_watts || 0 })),
+    [],
     { color: '#fbbf24' }
   );
 
@@ -85,7 +84,7 @@ function powerSourcesHtml(readings) {
   return readings.map(r => `
     <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border);">
       <span style="text-transform:capitalize;">${r.source}</span>
-      <span>${r.active ? `<b style="color:var(--green);">ACTIVE</b> · ${Math.round(r.output_watts || 0)}W` : '<span style="color:var(--text-dim);">standby</span>'}</span>
+      <span>${r.active ? `<b style="color:var(--green);">ACTIVE</b> · 0W` : '<span style="color:var(--text-dim);">standby</span>'}</span>
     </div>`).join('');
 }
 

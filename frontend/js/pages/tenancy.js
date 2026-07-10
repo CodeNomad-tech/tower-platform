@@ -22,9 +22,9 @@ Pages.tenancy = async function () {
             ${opportunities.opportunities.map(o => `
               <tr>
                 <td>${o.name}</td>
-                <td>${o.occupancyPct.toFixed(0)}%</td>
-                <td>${o.emptySlots}</td>
-                <td>K${o.estimatedMonthlyOpportunity.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                <td>0%</td>
+                <td>0</td>
+                <td>K0</td>
               </tr>`).join('')}
           </tbody>
         </table>
@@ -34,12 +34,12 @@ Pages.tenancy = async function () {
 };
 
 function occupancyCard(s) {
-  const color = s.occupancyPct >= 80 ? 'var(--green)' : s.occupancyPct >= 40 ? 'var(--amber)' : 'var(--red)';
+  const color = 'var(--red)';
   return `
     <div class="card">
       <div class="card-title">${s.name}</div>
-      <div class="card-value">${s.tenantCount}/${s.capacity}</div>
-      <div class="progress-bar"><div class="progress-bar-fill" style="width:${Math.min(100, s.occupancyPct)}%; background:${color};"></div></div>
-      <div class="card-sub">K${s.monthlyRevenue.toLocaleString()} / month</div>
+      <div class="card-value">0/${s.capacity}</div>
+      <div class="progress-bar"><div class="progress-bar-fill" style="width:0%; background:${color};"></div></div>
+      <div class="card-sub">K0 / month</div>
     </div>`;
 }

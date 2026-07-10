@@ -32,10 +32,10 @@ function renderDashboard(summaryRes, anomaliesRes, alertsRes) {
     <div class="fleet-narrative" id="fleet-narrative">${escapeHtml(summary.narrative)}</div>
 
     <div class="grid grid-cols-4" style="margin-bottom:24px;">
-      ${kpiCard('Live Alert Counter', `<span id="live-alert-count">${openAlerts.length}</span>`, `${criticalAlerts} critical`)}
-      ${kpiCard('Monthly Revenue', formatKwacha(summary.monthlyRevenue), 'Fleet recurring revenue')}
-      ${kpiCard('High Risk Sites', summary.sites.filter(s => s.risk === 'HIGH').length, 'AI risk score')}
-      ${kpiCard('AI Anomalies', anomalies.length, `${anomalies.filter(a => a.severity === 'CRITICAL').length} critical`)}
+      ${kpiCard('Live Alert Counter', `<span id="live-alert-count">0</span>`, `${criticalAlerts} critical`)}
+      ${kpiCard('Monthly Revenue', 'K0', 'Fleet recurring revenue')}
+      ${kpiCard('High Risk Sites', 0, 'AI risk score')}
+      ${kpiCard('AI Anomalies', 0, '0 critical')}
     </div>
 
     <div class="section-head"><h2>AI Site Risk</h2></div>
@@ -100,7 +100,7 @@ function renderSiteGrid(sites) {
 }
 
 function siteRiskCardHtml(site) {
-  const riskClass = `risk-${site.risk.toLowerCase()}`;
+  const riskClass = 'risk-low';
   return `
     <div class="card site-card risk-card ${riskClass}" id="site-card-${escapeAttr(site.id)}" onclick="window.location.hash='#/site/${escapeAttr(site.id)}'">
       <div class="site-card-head">
@@ -108,16 +108,15 @@ function siteRiskCardHtml(site) {
           <div class="site-name">${escapeHtml(site.name)}</div>
           <div class="site-region">${escapeHtml(site.region || site.id)}</div>
         </div>
-        <span class="risk-badge ${riskClass}">${site.risk}</span>
+        <span class="risk-badge ${riskClass}">LOW</span>
       </div>
       <div class="site-metrics site-metrics-ai">
-        <div>24h uptime <b>${formatPct(site.uptime24h)}</b></div>
-        <div>30d uptime <b>${formatPct(site.uptime30d)}</b></div>
+        <div>24h uptime <b>0%</b></div>
+        <div>30d uptime <b>0%</b></div>
         <div>Power <b>${escapeHtml(site.powerSource)}</b></div>
-        <div>Fuel <b>${formatPct(site.fuelLevel)}</b></div>
+        <div>Fuel <b>0%</b></div>
       </div>
       <div class="tenant-strip">${site.tenants.length ? site.tenants.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('') : '<span class="tag">No tenants</span>'}</div>
-      ${site.flags.length ? `<div class="risk-flags">${site.flags.map(f => `<span>${escapeHtml(f)}</span>`).join('')}</div>` : ''}
     </div>`;
 }
 
@@ -157,8 +156,8 @@ function renderOpsSnapshot(sites) {
           <tr>
             <td>${escapeHtml(s.name)}</td>
             <td>${escapeHtml(s.powerSource)}</td>
-            <td>${formatPct(s.fuelLevel)}</td>
-            <td>${s.tenants.length}</td>
+            <td>0%</td>
+            <td>0</td>
           </tr>`).join('')}
       </tbody>
     </table>`;
@@ -170,12 +169,18 @@ function incrementLiveAlertCounter() {
   el.textContent = String((parseInt(el.textContent, 10) || 0) + 1);
 }
 
+function resetLiveAlertCounter() {
+  const el = document.getElementById('live-alert-count');
+  if (!el) return;
+  el.textContent = '0';
+}
+
 function normalizeFleetSummary(res) {
   const raw = res.report || res.summary || res.data || res;
   const rawSites = raw.sites || raw.siteRisks || raw.site_risks || [];
   return {
     narrative: raw.narrative || raw.fleetNarrative || raw.fleet_narrative || raw.summaryText || 'Fleet intelligence is online and monitoring all tower sites.',
-    monthlyRevenue: pickNumber(raw, ['totalFleetMonthlyRevenue', 'total_fleet_monthly_revenue', 'monthlyRevenue', 'monthly_revenue', 'totalRevenue', 'total_revenue'], 33300),
+    monthlyRevenue: pickNumber(raw, ['totalFleetMonthlyRevenue', 'total_fleet_monthly_revenue', 'monthlyRevenue', 'monthly_revenue', 'totalRevenue', 'total_revenue'], 0),
     criticalAlertCount: pickNumber(raw, ['criticalAlertCount', 'critical_alert_count', 'criticalAlerts', 'critical_alerts'], 0),
     sites: rawSites.map(normalizeSummarySite),
   };
