@@ -1,132 +1,80 @@
-// Tiny dependency-free chart renderer (canvas-based line, bar, and pie charts).
+/* Dependency-free SVG charts. Colours come from CSS variables so both themes work.
+   Each function renders into a container element at its current width. */
+'use strict';
+
 const Charts = {
-  line(canvas, series, { color = '#3ea6ff', fill = true, yLabel = '', min = null, max = null } = {}) {
-    const ctx = canvas.getContext('2d');
-    const dpr = window.devicePixelRatio || 1;
-    const w = canvas.clientWidth, h = canvas.clientHeight;
-    canvas.width = w * dpr; canvas.height = h * dpr;
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, w, h);
+  _w(el) { return Math.max(280, Math.floor(el.getBoundingClientRect().width || el.clientWidth || 600)); },
 
-    if (!series.length) {
-      ctx.fillStyle = '#5a6678'; ctx.font = '12px sans-serif';
-      ctx.fillText('No data yet', 10, h / 2);
-      return;
-    }
-
-    const pad = { top: 10, right: 10, bottom: 20, left: 36 };
-    const values = series.map(p => p.y);
-    const yMin = min ?? Math.min(...values);
-    const yMax = max ?? Math.max(...values, yMin + 1);
-    const xMin = series[0].x, xMax = series[series.length - 1].x || xMin + 1;
-
-    const xScale = (x) => pad.left + ((x - xMin) / Math.max(1, xMax - xMin)) * (w - pad.left - pad.right);
-    const yScale = (y) => h - pad.bottom - ((y - yMin) / Math.max(1e-6, yMax - yMin)) * (h - pad.top - pad.bottom);
-
-    // gridlines
-    ctx.strokeStyle = '#1e2735'; ctx.lineWidth = 1;
-    ctx.fillStyle = '#5a6678'; ctx.font = '10px sans-serif';
-    for (let i = 0; i <= 3; i++) {
-      const y = pad.top + (i / 3) * (h - pad.top - pad.bottom);
-      ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
-      const val = yMax - (i / 3) * (yMax - yMin);
-      ctx.fillText(val.toFixed(0), 2, y + 3);
-    }
-
-    // line path
-    ctx.beginPath();
-    series.forEach((p, i) => {
-      const x = xScale(p.x), y = yScale(p.y);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
-
-    if (fill) {
-      ctx.lineTo(xScale(series[series.length - 1].x), h - pad.bottom);
-      ctx.lineTo(xScale(series[0].x), h - pad.bottom);
-      ctx.closePath();
-      const grad = ctx.createLinearGradient(0, pad.top, 0, h - pad.bottom);
-      grad.addColorStop(0, color + '33'); grad.addColorStop(1, color + '00');
-      ctx.fillStyle = grad; ctx.fill();
-    }
+  /**
+   * Blackout survival curve: P(site still powered) over the forecast horizon,
+   * with hourly blackout probability as faint bars underneath.
+   */
+  survival(el, survival, darkByHour, { tolerance = 0.1 } = {}) {
+    const W = this._w(el), H = 220, p = { l: 40, r: 12, t: 12, b: 26 };
+    const maxH = survival[survival.length - 1].h;
+    const x = (h) => p.l + (h / maxH) * (W - p.l - p.r);
+    const y = (v) => p.t + (1 - v) * (H - p.t - p.b);
+    let g = '';
+    for (const v of [0, 0.25, 0.5, 0.75, 1]) g += `<line class="grid-line" x1="${p.l}" x2="${W - p.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${p.l - 6}" y="${y(v) + 4}" text-anchor="end">${v * 100}%</text>`;
+    for (let h = 0; h <= maxH; h += 12) g += `<text x="${x(h)}" y="${H - 6}" text-anchor="middle">${h === 0 ? 'now' : '+' + h + 'h'}</text>`;
+    const bw = (W - p.l - p.r) / maxH;
+    const bars = darkByHour.map((v, i) => v > 0.001 ? `<rect x="${x(i) + 0.5}" y="${y(v)}" width="${Math.max(1, bw - 1)}" height="${y(0) - y(v)}" fill="var(--crit)" opacity="0.28"/>` : '').join('');
+    const pts = survival.map((s) => `${x(s.h).toFixed(1)},${y(s.pPowered).toFixed(1)}`).join(' ');
+    const area = `${x(0)},${y(0)} ${pts} ${x(maxH)},${y(0)}`;
+    const tol = `<line x1="${p.l}" x2="${W - p.r}" y1="${y(1 - tolerance)}" y2="${y(1 - tolerance)}" stroke="var(--watch)" stroke-dasharray="4 4" stroke-width="1"/><text x="${W - p.r}" y="${y(1 - tolerance) - 5}" text-anchor="end" style="fill:var(--watch)">risk tolerance ${Math.round(tolerance * 100)}%</text>`;
+    el.innerHTML = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Probability the site stays powered over the next ${maxH} hours">
+      ${g}${bars}<polygon points="${area}" fill="var(--brand)" opacity="0.12"/>
+      <polyline points="${pts}" fill="none" stroke="var(--brand)" stroke-width="2.2" stroke-linejoin="round"/>${tol}</svg>`;
   },
 
-  pie(canvas, data, { colors = ['#3ea6ff', '#2dc653', '#ff9f43', '#ff5e57', '#8b5cf6'] } = {}) {
-    const ctx = canvas.getContext('2d');
-    const dpr = window.devicePixelRatio || 1;
-    const w = canvas.clientWidth || 220, h = canvas.clientHeight || 220;
-    canvas.width = w * dpr; canvas.height = h * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-
-    const safeData = (data || []).filter(item => Number(item.value || 0) > 0);
-    const total = safeData.reduce((sum, item) => sum + Number(item.value || 0), 0);
-
-    if (!safeData.length || !total) {
-      ctx.fillStyle = '#5a6678'; ctx.font = '12px sans-serif';
-      ctx.fillText('No data yet', 10, h / 2);
-      return;
+  /** 24h+ timeline: supply source band + fuel % and battery % lines. */
+  timeline(el, points, { deliveries = [], theft = [] } = {}) {
+    if (!points.length) { el.innerHTML = empty('No telemetry in this window').s; return; }
+    const W = this._w(el), H = 210, p = { l: 40, r: 12, t: 10, b: 26 }, bandH = 18;
+    const t0 = fmt.date(points[0].ts).getTime(), t1 = Date.now();
+    const x = (t) => p.l + ((t - t0) / Math.max(1, t1 - t0)) * (W - p.l - p.r);
+    const top = p.t + bandH + 10;
+    const y = (v) => top + (1 - v / 100) * (H - top - p.b);
+    let g = '';
+    for (const v of [0, 50, 100]) g += `<line class="grid-line" x1="${p.l}" x2="${W - p.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${p.l - 6}" y="${y(v) + 4}" text-anchor="end">${v}%</text>`;
+    const step = (t1 - t0) > 2 * 86400000 ? 24 : 6;
+    for (let t = Math.ceil(t0 / (step * 3600000)) * step * 3600000; t < t1; t += step * 3600000) {
+      g += `<text x="${x(t)}" y="${H - 6}" text-anchor="middle">${new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</text>`;
     }
-
-    const centerX = w / 2;
-    const centerY = h / 2;
-    const radius = Math.min(w, h) / 2 - 16;
-    let startAngle = -Math.PI / 2;
-
-    safeData.forEach((item, index) => {
-      const slice = (Number(item.value || 0) / total) * Math.PI * 2;
-      ctx.beginPath();
-      ctx.moveTo(centerX, centerY);
-      ctx.arc(centerX, centerY, radius, startAngle, startAngle + slice);
-      ctx.closePath();
-      ctx.fillStyle = item.color || colors[index % colors.length];
-      ctx.fill();
-      startAngle += slice;
-    });
-
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius * 0.55, 0, Math.PI * 2);
-    ctx.fillStyle = '#111827';
-    ctx.fill();
-
-    ctx.fillStyle = '#e8edf4';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = 'bold 16px sans-serif';
-    ctx.fillText(String(total), centerX, centerY - 4);
-    ctx.font = '11px sans-serif';
-    ctx.fillText('total', centerX, centerY + 14);
+    const band = points.map((pt, i) => {
+      const a = fmt.date(pt.ts).getTime(), b = i + 1 < points.length ? fmt.date(points[i + 1].ts).getTime() : Math.min(t1, a + 900000);
+      return `<rect x="${x(a).toFixed(1)}" y="${p.t}" width="${Math.max(0.6, x(b) - x(a)).toFixed(1)}" height="${bandH}" fill="var(--src-${pt.source || 'none'})"><title>${fmt.time(pt.ts)} ${SOURCE_LABEL[pt.source] || pt.source}</title></rect>`;
+    }).join('');
+    const line = (key, color, dash = '') => {
+      const pts = points.filter((pt) => pt[key] != null).map((pt) => `${x(fmt.date(pt.ts).getTime()).toFixed(1)},${y(pt[key]).toFixed(1)}`).join(' ');
+      return pts ? `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" ${dash ? `stroke-dasharray="${dash}"` : ''} stroke-linejoin="round"/>` : '';
+    };
+    const marks = deliveries.map((d) => `<g><line x1="${x(fmt.date(d.ts).getTime())}" x2="${x(fmt.date(d.ts).getTime())}" y1="${top}" y2="${y(0)}" stroke="var(--ok)" stroke-dasharray="2 3"/><text x="${x(fmt.date(d.ts).getTime()) + 4}" y="${top + 10}" style="fill:var(--ok)">+${Math.round(d.litres)} L</text></g>`).join('')
+      + theft.map((d) => `<g><line x1="${x(fmt.date(d.ts).getTime())}" x2="${x(fmt.date(d.ts).getTime())}" y1="${top}" y2="${y(0)}" stroke="var(--crit)" stroke-dasharray="2 3"/><text x="${x(fmt.date(d.ts).getTime()) + 4}" y="${top + 22}" style="fill:var(--crit)">theft</text></g>`).join('');
+    el.innerHTML = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Supply source, fuel and battery over time">${g}${band}${line('fuelPct', 'var(--src-generator)')}${line('batteryPct', 'var(--src-battery)', '5 3')}${marks}</svg>`;
   },
 
-  bar(canvas, data, { color = '#3ea6ff', labelKey = 'label', valueKey = 'value' } = {}) {
-    const ctx = canvas.getContext('2d');
-    const dpr = window.devicePixelRatio || 1;
-    const w = canvas.clientWidth, h = canvas.clientHeight;
-    canvas.width = w * dpr; canvas.height = h * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
+  /** Single stacked horizontal bar from [{key, value, color, label}]. */
+  stack(parts) {
+    const total = parts.reduce((s, p) => s + Math.max(0, p.value), 0) || 1;
+    return raw(`<div class="waterfall" role="img" aria-label="${esc(parts.map((p) => `${p.label}: ${Math.round(p.value / total * 100)}%`).join(', '))}">${parts.map((p) => p.value > 0 ? `<span style="width:${(p.value / total * 100).toFixed(2)}%;background:${p.color}" title="${esc(p.label)}: ${Math.round(p.value / total * 100)}%"></span>` : '').join('')}</div>`);
+  },
 
-    if (!data.length) {
-      ctx.fillStyle = '#5a6678'; ctx.font = '12px sans-serif';
-      ctx.fillText('No data yet', 10, h / 2);
-      return;
-    }
-
-    const pad = { top: 10, right: 10, bottom: 24, left: 10 };
-    const max = Math.max(...data.map(d => d[valueKey]), 1);
-    const barW = (w - pad.left - pad.right) / data.length;
-
-    data.forEach((d, i) => {
-      const barH = ((d[valueKey] / max) * (h - pad.top - pad.bottom)) || 0;
-      const x = pad.left + i * barW + barW * 0.15;
-      const y = h - pad.bottom - barH;
-      ctx.fillStyle = color;
-      ctx.fillRect(x, y, barW * 0.7, barH);
-      ctx.fillStyle = '#8b98ab'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText(d[labelKey], x + barW * 0.35, h - 8);
-      ctx.fillStyle = '#e8edf4';
-      ctx.fillText(d[valueKey].toFixed(0), x + barW * 0.35, y - 4);
-    });
-    ctx.textAlign = 'left';
+  /** Vertical bars with labels: [{label, value, color?}] */
+  bars(el, data, { unit = '', max = null, height = 180 } = {}) {
+    if (!data.length) { el.innerHTML = empty('No data').s; return; }
+    const W = this._w(el), H = height, p = { l: 8, r: 8, t: 18, b: 34 };
+    const m = max ?? Math.max(...data.map((d) => d.value), 1);
+    const bw = (W - p.l - p.r) / data.length;
+    const out = data.map((d, i) => {
+      const bh = (d.value / m) * (H - p.t - p.b);
+      const x0 = p.l + i * bw + bw * 0.18;
+      return `<rect x="${x0}" y="${H - p.b - bh}" width="${bw * 0.64}" height="${Math.max(0, bh)}" rx="3" fill="${d.color || 'var(--info)'}"/>
+        <text x="${x0 + bw * 0.32}" y="${H - p.b - bh - 5}" text-anchor="middle" style="fill:var(--text-2)">${esc(d.valueLabel ?? (Math.round(d.value) + unit))}</text>
+        <text x="${x0 + bw * 0.32}" y="${H - 14}" text-anchor="middle">${esc(d.label)}</text>`;
+    }).join('');
+    el.innerHTML = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(data.map((d) => `${d.label} ${Math.round(d.value)}${unit}`).join(', '))}"><line class="axis" x1="${p.l}" x2="${W - p.r}" y1="${H - p.b}" y2="${H - p.b}"/>${out}</svg>`;
   },
 };
+
+const SOURCE_COLORS = { grid: 'var(--src-grid)', solar: 'var(--src-solar)', battery: 'var(--src-battery)', generator: 'var(--src-generator)', dark: 'var(--src-none)', none: 'var(--src-none)' };

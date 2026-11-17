@@ -1,6 +1,9 @@
 node_modules/
 backend/data/
 backend/.env
+backend/tests/.tmp/
 *.db
+*.db-wal
+*.db-shm
 *.log
 .DS_Store

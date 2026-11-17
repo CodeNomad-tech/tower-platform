@@ -1,70 +1,66 @@
 'use strict';
-// Thin wrapper around node:sqlite (built into Node 22+, no external dependency).
-// Production note: see docs/DATABASE.md for the Postgres migration path —
-// the query shapes here are plain SQL and translate directly.
+// Thin wrapper around node:sqlite (built into Node 22.5+, no external dependency).
+// See docs/DATABASE.md for the Postgres migration path; call sites use only run/get/all/tx.
 
 const path = require('node:path');
 const fs = require('node:fs');
-
+// Older Node 22.x needs --experimental-sqlite. If the server was started with
+// plain `node src/server.js`, re-launch once with the flag (idea from the team's version).
 let DatabaseSync;
 try {
-  DatabaseSync = require('node:sqlite').DatabaseSync;
+  ({ DatabaseSync } = require('node:sqlite'));
 } catch (e) {
-  const hasFlag = process.execArgv.includes('--experimental-sqlite');
-  if (!hasFlag) {
+  if (!process.execArgv.includes('--experimental-sqlite') && require.main && require.main.filename) {
     const { spawnSync } = require('node:child_process');
-    const args = ['--experimental-sqlite', ...process.execArgv, ...process.argv.slice(1)];
-    const result = spawnSync(process.execPath, args, { stdio: 'inherit' });
-    process.exit(result.status ?? 0);
+    const r = spawnSync(process.execPath, ['--experimental-sqlite', ...process.execArgv, ...process.argv.slice(1)], { stdio: 'inherit' });
+    process.exit(r.status ?? 1);
   }
   throw e;
 }
+const config = require('../config');
 
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/tower_platform.db');
-fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+const DB_PATH = config.DB_PATH;
+if (DB_PATH !== ':memory:') fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA foreign_keys = ON;');
-
-function migrate() {
-  const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
-  db.exec(schema);
+if (DB_PATH !== ':memory:') {
+  db.exec('PRAGMA journal_mode = WAL;');
+  db.exec('PRAGMA synchronous = NORMAL;');
 }
-migrate();
+db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
 
-// Convenience helpers -------------------------------------------------------
-
-function run(sql, params = []) {
-  const stmt = db.prepare(sql);
-  return stmt.run(...params);
-}
-
-function get(sql, params = []) {
-  const stmt = db.prepare(sql);
-  return stmt.get(...params);
+const stmtCache = new Map();
+function prepare(sql) {
+  let s = stmtCache.get(sql);
+  if (!s) { s = db.prepare(sql); stmtCache.set(sql, s); }
+  return s;
 }
 
-function all(sql, params = []) {
-  const stmt = db.prepare(sql);
-  return stmt.all(...params);
+function run(sql, params = []) { return prepare(sql).run(...params); }
+function get(sql, params = []) { return prepare(sql).get(...params); }
+function all(sql, params = []) { return prepare(sql).all(...params); }
+
+// Runs fn inside a single transaction (much faster for bulk inserts).
+function tx(fn) {
+  db.exec('BEGIN');
+  try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
-// All timestamps stored via SQLite's datetime('now') use the format
-// 'YYYY-MM-DD HH:MM:SS' (space separator, no milliseconds, UTC, no 'Z').
-// JS's Date#toISOString() uses a DIFFERENT format ('...T...Z with ms),
-// which sorts incorrectly against the SQLite format in plain string
-// comparisons. Every timestamp that originates in JS and is compared
-// against or inserted into a TEXT timestamp column MUST go through this
-// helper so lexicographic string comparison matches chronological order.
+// All stored timestamps use 'YYYY-MM-DD HH:MM:SS' (UTC). Date#toISOString()
+// uses a different format that sorts incorrectly against it, so every JS
+// timestamp that is compared with or inserted into a ts column goes through here.
 function toSqliteTs(date) {
-  return date.toISOString().slice(0, 19).replace('T', ' ');
+  return new Date(date).toISOString().slice(0, 19).replace('T', ' ');
 }
-
-// Normalizes any date-ish input (Date object, ISO string from a query
-// param, plain 'YYYY-MM-DD', etc.) to the SQLite-comparable format.
 function normalizeTs(value) {
-  if (value instanceof Date) return toSqliteTs(value);
-  return toSqliteTs(new Date(value));
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return toSqliteTs(d);
+}
+// Parses a stored timestamp back to epoch ms (it is UTC without a 'Z').
+function tsToMs(ts) {
+  return Date.parse(String(ts).replace(' ', 'T') + 'Z');
 }
 
-module.exports = { db, run, get, all, DB_PATH, toSqliteTs, normalizeTs };
+module.exports = { db, run, get, all, tx, DB_PATH, toSqliteTs, normalizeTs, tsToMs };

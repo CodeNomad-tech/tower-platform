@@ -21,6 +21,7 @@
  */
 
 const net = require('node:net');
+const MAX_PACKET = 256 * 1024;
 const EventEmitter = require('node:events');
 
 const TYPE = {
@@ -71,12 +72,17 @@ class MqttBroker extends EventEmitter {
   }
 
   listen() {
-    return new Promise((resolve) => {
-      this.server.listen(this.port, () => resolve(this.port));
+    return new Promise((resolve, reject) => {
+      const onError = (e) => reject(e);
+      this.server.once('error', onError);
+      this.server.listen(this.port, () => { this.server.off('error', onError); this.listening = true; resolve(this.port); });
     });
   }
 
   close() {
+    if (!this.listening) return Promise.resolve();
+    for (const socket of this.clients.keys()) socket.destroy();
+    this.clients.clear();
     return new Promise((resolve) => this.server.close(resolve));
   }
 
@@ -86,7 +92,14 @@ class MqttBroker extends EventEmitter {
 
     socket.on('data', (chunk) => {
       client.buffer = Buffer.concat([client.buffer, chunk]);
-      this._processBuffer(socket, client);
+      if (client.buffer.length > MAX_PACKET) { socket.destroy(); return; }
+      try {
+        this._processBuffer(socket, client);
+      } catch (e) {
+        // Malformed packet: drop this client rather than crash the broker.
+        this.emit('protocol-error', client.id, e.message);
+        socket.destroy();
+      }
     });
     socket.on('close', () => this.clients.delete(socket));
     socket.on('error', () => this.clients.delete(socket));

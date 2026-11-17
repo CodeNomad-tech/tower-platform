@@ -1,133 +1,124 @@
 'use strict';
 /**
- * Fleet simulator — stands in for physical hardware across a network of
- * towers (this is the "closest functional alternative" documented in
- * docs/HARDWARE_SIMULATION.md; see that file for the real-hardware
- * replacement path). It publishes over the SAME MQTT topics and payload
- * schema a real device would use, so the backend and frontend cannot tell
- * the difference between this and a real fleet.
+ * Fleet simulator: stands in for tower hardware in demo mode.
  *
- * Realism, not randomness:
- *  - Solar output follows an actual diurnal (sunrise/sunset) curve.
- *  - Fuel drains proportionally to generator runtime, not randomly.
- *  - Automatic power switching follows real priority logic (grid > solar > generator).
- *  - Occasional bounded anomaly events (theft, smoke, motion) are injected
- *    deliberately and rarely, to exercise the alert pipeline — documented
- *    here, not hidden.
+ * Each site is driven by the same power model used for history and
+ * forecasting (engine/powerModel.js), in REAL TIME (not accelerated), under
+ * its load-shedding profile. It publishes over MQTT using the exact topic and
+ * payload contract a real remote-monitoring unit would use, so the backend
+ * cannot tell it apart from hardware.
+ *
+ * It resumes from the last persisted state (fuel, battery, generator), so the
+ * live stream continues seamlessly from the simulated 30-day history.
+ *
+ * `controls` lets an admin trigger demo scenarios (feeder outage, siphoning,
+ * intrusion, smoke, fuel delivery) via /api/demo. Each is a physical change to
+ * the simulated site, and the platform reacts through its normal pipeline.
  */
 
+const config = require('../config');
+const db = require('../db');
 const { MqttClient } = require('../mqtt/client');
-const { DEMO_SITES } = require('../db/seed');
+const { step, rng, localHour, solarShape } = require('../engine/powerModel');
+const { PROFILES, scheduleSimulator } = require('../engine/gridModel');
 
-const TICK_MS = 4000; // one simulated telemetry tick per site every 4s (~kiosk/demo pace)
-
-function solarOutputWatts(hourFloat) {
-  // Simple daylight bell curve: 0 before 6am/after 6pm, peak ~1000W at noon
-  if (hourFloat < 6 || hourFloat > 18) return 0;
-  const x = (hourFloat - 12) / 6; // -1..1
-  return Math.max(0, 1000 * Math.cos((Math.PI / 2) * x));
-}
-
-function nowHourFloat() {
-  const d = new Date();
-  return d.getHours() + d.getMinutes() / 60;
-}
-
-class SiteState {
-  constructor(id) {
-    this.id = id;
-    this.fuelPct = 70 + Math.random() * 25;
-    this.generatorOn = false;
-    this.activeSource = 'grid';
-    this.gridUp = true;
-    this.tempC = 24 + Math.random() * 4;
-    this.tickCount = 0; // resets to zero on each simulator (re)start
+class SimSite {
+  constructor(row, rand) {
+    this.id = row.site_id;
+    this.a = { ...row };
+    this.rand = rand;
+    const fuel = db.get('SELECT level_pct FROM fuel_readings WHERE site_id = ? ORDER BY ts DESC, id DESC LIMIT 1', [this.id]);
+    const batt = db.get('SELECT soc_pct FROM battery_readings WHERE site_id = ? ORDER BY ts DESC, id DESC LIMIT 1', [this.id]);
+    const gen = db.get('SELECT event FROM generator_runtime_log WHERE site_id = ? ORDER BY ts DESC, id DESC LIMIT 1', [this.id]);
+    const env = db.get('SELECT temperature_c FROM env_readings WHERE site_id = ? ORDER BY ts DESC, id DESC LIMIT 1', [this.id]);
+    this.st = {
+      fuelL: fuel ? (fuel.level_pct / 100) * this.a.tank_l : this.a.tank_l * 0.7,
+      socKwh: batt ? (batt.soc_pct / 100) * this.a.battery_kwh : this.a.battery_kwh,
+      genOn: gen ? gen.event === 'start' : false,
+    };
+    this.tempC = env?.temperature_c ?? 26;
+    this.grid = scheduleSimulator(PROFILES[this.a.grid_profile] || PROFILES.A, rand);
+    this.forcedOutageUntil = 0;
+    this.forcedGridUp = false;
+    this.pending = [];   // one-shot events (smoke, intrusion)
+    this.tick = 0;
+    this.cloud = 0.6 + rand() * 0.4;
   }
 }
+
+const controls = {
+  sites: new Map(),
+  enabled: false,
+  outage(siteId, hours = 6) { const s = this._s(siteId); s.forcedOutageUntil = Date.now() + hours * 3600000; s.forcedGridUp = false; return { siteId, gridForcedOffUntil: new Date(s.forcedOutageUntil).toISOString() }; },
+  restoreGrid(siteId) { const s = this._s(siteId); s.forcedOutageUntil = 0; s.forcedGridUp = true; setTimeout(() => { s.forcedGridUp = false; }, 30 * 60000); return { siteId, grid: 'restored for 30 min' }; },
+  siphon(siteId, litres) { const s = this._s(siteId); const taken = Math.min(s.st.fuelL, litres); s.st.fuelL -= taken; return { siteId, litresRemoved: Math.round(taken) }; },
+  deliver(siteId, litres) { const s = this._s(siteId); const add = Math.min(litres, s.a.tank_l - s.st.fuelL); s.st.fuelL += add; return { siteId, litresAdded: Math.round(add) }; },
+  intrusion(siteId) { this._s(siteId).pending.push('intrusion'); return { siteId, event: 'intrusion' }; },
+  smoke(siteId) { this._s(siteId).pending.push('smoke'); return { siteId, event: 'smoke' }; },
+  snapshot() {
+    return [...this.sites.values()].map(s => ({
+      siteId: s.id, fuelL: Math.round(s.st.fuelL), socPct: s.a.battery_kwh ? Math.round(s.st.socKwh / s.a.battery_kwh * 100) : null,
+      genOn: s.st.genOn, forcedOutage: s.forcedOutageUntil > Date.now(),
+    }));
+  },
+  _s(siteId) {
+    const s = this.sites.get(siteId);
+    if (!s) throw Object.assign(new Error('Site is not driven by the simulator'), { status: 404 });
+    return s;
+  },
+};
 
 async function startFleetSimulator({ mqttPort }) {
   const client = new MqttClient({ port: mqttPort, clientId: 'fleet-simulator' });
   await client.connect();
+  const rand = rng(Date.now() & 0xffffffff);
+  const rows = db.all('SELECT a.* FROM site_assets a JOIN sites s ON s.id = a.site_id WHERE s.simulated = 1');
+  for (const row of rows) controls.sites.set(row.site_id, new SimSite(row, rand));
+  controls.enabled = true;
 
-  const states = DEMO_SITES.map(s => new SiteState(s.id));
-
-  for (const state of states) {
-    // Stagger each site's ticks slightly so the demo doesn't look like one synchronized pulse
-    const jitter = Math.floor(Math.random() * 1500);
-    setTimeout(() => {
-      tick(client, state); // fire once immediately so the dashboard has data right away
-      setInterval(() => tick(client, state), TICK_MS);
-    }, jitter);
+  const dtH = config.SIM_TICK_MS / 3600000;
+  const timers = [];
+  for (const sim of controls.sites.values()) {
+    const run = () => { try { tick(client, sim, dtH); } catch (e) { console.error('[simulator]', e.message); } };
+    timers.push(setTimeout(() => { run(); timers.push(setInterval(run, config.SIM_TICK_MS)); }, Math.floor(rand() * 2000)));
   }
-
-  return client;
+  return { client, stop: () => { timers.forEach(t => { clearTimeout(t); clearInterval(t); }); client.end(); controls.enabled = false; } };
 }
 
-function tick(client, state) {
-  state.tickCount++;
-  const hour = nowHourFloat();
-  const solarW = solarOutputWatts(hour);
+function tick(client, sim, dtH) {
+  const now = Date.now();
+  const pub = (ch, obj) => client.publish(`sites/${sim.id}/${ch}`, JSON.stringify(obj));
+  sim.tick++;
+  if (sim.tick % 360 === 0) sim.cloud = 0.6 + sim.rand() * 0.4;
 
-  // Occasionally simulate a brief grid outage (rare, bounded) to exercise auto-switching
-  if (state.tickCount % 90 === 0) state.gridUp = !state.gridUp || Math.random() > 0.15;
+  const scheduledUp = sim.grid(now, dtH);
+  const gridUp = sim.forcedGridUp || (scheduledUp && now >= sim.forcedOutageUntil);
+  const solarKw = sim.a.solar_kw * solarShape(localHour(now)) * sim.cloud;
+  const r = step(sim.st, sim.a, gridUp, solarKw, dtH);
 
-  // Source priority: grid > solar (if enough output) > generator
-  let source;
-  if (state.gridUp) source = 'grid';
-  else if (solarW > 300) source = 'solar';
-  else source = 'generator';
+  if (r.genStarted) pub('generator', { event: 'start' });
+  if (r.genStopped) pub('generator', { event: 'stop' });
 
-  const wasGeneratorOn = state.generatorOn;
-  state.generatorOn = source === 'generator';
-  if (state.generatorOn && !wasGeneratorOn) {
-    client.publish(`sites/${state.id}/generator`, JSON.stringify({ event: 'start' }));
-  } else if (!state.generatorOn && wasGeneratorOn) {
-    client.publish(`sites/${state.id}/generator`, JSON.stringify({ event: 'stop' }));
+  const kw = { grid: r.gridKw, solar: r.solarKw, battery: r.batteryKw, generator: r.genKw };
+  for (const s of ['grid', 'solar', 'battery', 'generator']) {
+    const active = r.source === s;
+    const voltage = s === 'grid' ? (gridUp ? 220 + (sim.rand() * 8 - 4) : 0) : s === 'battery' ? 48 + 4 * (sim.st.socKwh / Math.max(1, sim.a.battery_kwh)) : active ? 220 : 0;
+    pub('power', { source: s, active, voltage: Math.round(voltage * 10) / 10, output_watts: Math.round(kw[s] * 1000) });
   }
+  if (sim.a.battery_kwh > 0) pub('battery', { soc_pct: Math.round((sim.st.socKwh / sim.a.battery_kwh) * 1000) / 10 });
+  if (sim.a.tank_l > 0) pub('fuel', { level_pct: Math.round((sim.st.fuelL / sim.a.tank_l) * 1000) / 10, generator_on: sim.st.genOn });
 
-  // Publish all three source readings (active flag marks which one is currently supplying)
-  for (const src of ['grid', 'solar', 'generator']) {
-    const active = src === source;
-    let watts = 0;
-    if (src === 'grid') watts = active ? 800 + Math.random() * 100 : 0;
-    if (src === 'solar') watts = active ? solarW : solarW > 0 ? solarW * 0.1 : 0; // trickle-charging even when not primary
-    if (src === 'generator') watts = active ? 750 + Math.random() * 80 : 0;
-    client.publish(`sites/${state.id}/power`, JSON.stringify({
-      source: src, active, voltage: active ? 220 + (Math.random() * 6 - 3) : 0, output_watts: Math.round(watts),
-    }));
+  if (sim.tick % 6 === 1 || sim.pending.length) {
+    const h = localHour(now);
+    const ambient = 21 + 9 * Math.max(0, Math.sin((Math.PI * (h - 8)) / 14));
+    sim.tempC += ((ambient + (sim.st.genOn ? 6 : 0)) - sim.tempC) * 0.05 + (sim.rand() - 0.5) * 0.2;
+    const smoke = sim.pending.includes('smoke');
+    pub('env', { temperature_c: Math.round(sim.tempC * 10) / 10, smoke_detected: smoke, door_open: false, motion_detected: false });
   }
+  if (sim.pending.includes('intrusion')) pub('security', { event_type: 'intrusion', source: 'camera', confidence: 0.93 });
+  sim.pending = [];
 
-  // Fuel drains only while generator runs; refuels occasionally (simulated service visit)
-  if (state.generatorOn) {
-    state.fuelPct = Math.max(0, state.fuelPct - 0.35); // ~drain rate per tick
-  }
-  if (state.fuelPct < 15 && state.tickCount % 200 === 0) {
-    state.fuelPct = 95; // simulated refuel
-  }
-  // Rare injected anomaly: sudden fuel drop while generator is off (theft simulation)
-  if (state.tickCount % 500 === 137) {
-    state.fuelPct = Math.max(0, state.fuelPct - 20);
-  }
-  client.publish(`sites/${state.id}/fuel`, JSON.stringify({
-    level_pct: Number(state.fuelPct.toFixed(1)), generator_on: state.generatorOn,
-  }));
-
-  // Environmental: temperature drifts with generator heat + time of day; rare smoke/motion events
-  state.tempC += (state.generatorOn ? 0.15 : -0.05) + (Math.random() * 0.2 - 0.1);
-  state.tempC = Math.max(18, Math.min(50, state.tempC));
-  const smoke = state.tickCount % 700 === 313; // very rare, deliberate demo event
-  const motion = Math.random() < 0.03;
-  const doorOpen = Math.random() < 0.02;
-  client.publish(`sites/${state.id}/env`, JSON.stringify({
-    temperature_c: Number(state.tempC.toFixed(1)), smoke_detected: smoke, door_open: doorOpen, motion_detected: motion,
-  }));
-  if (motion) {
-    client.publish(`sites/${state.id}/security`, JSON.stringify({
-      event_type: 'motion', source: 'pir', confidence: 0.8 + Math.random() * 0.15,
-    }));
-  }
-
-  client.publish(`sites/${state.id}/heartbeat`, JSON.stringify({ ts: Date.now() }));
+  pub('heartbeat', { powered: !r.dark });
 }
 
-module.exports = { startFleetSimulator, solarOutputWatts };
+module.exports = { startFleetSimulator, controls };

@@ -1,120 +1,80 @@
-# Smart Tower Monitoring & Infrastructure Intelligence Platform
+# TowerIQ
 
-A full-stack prototype for telecom tower and infrastructure monitoring —
-uptime/SLA tracking, power management (grid/solar/generator), fuel &
-generator intelligence (including theft detection), environmental &
-security monitoring (with real phone-camera CCTV), commercial/tenancy
-intelligence, and reporting & analytics with predictive maintenance
-indicators.
+**Know which towers will go dark, before they do.**
 
-Built for a hackathon prototype with **zero purchased hardware** and
-**zero paid cloud services** — but architected exactly as it would be for
-a real deployment. See [`docs/HARDWARE_SIMULATION.md`](docs/HARDWARE_SIMULATION.md)
-for exactly what's simulated, why, and how to swap in the real thing.
+TowerIQ is a tower monitoring and resilience-intelligence platform built for
+the **INFRATEL–UNZA iHub Hackathon, Challenge 1: Smart Tower Monitoring &
+Infrastructure Intelligence**.
 
-## What makes this "real" and not a mockup
+Zambian towers go dark when load-shedding outlasts their battery, solar and
+diesel. Monitoring that reports a tower *is* down is too late. TowerIQ learns
+each tower's grid pattern and real fuel consumption, then forecasts blackout
+risk. It produces:
 
-- **Real MQTT protocol** (hand-rolled 3.1.1 broker + client, zero
-  dependencies) — any genuine MQTT device can connect to it exactly as it
-  would to Mosquitto or HiveMQ.
-- **Real database** (SQLite via Node's built-in `node:sqlite`) — every
-  reading, alert, and report is computed from persisted, queryable data,
-  not hardcoded values.
-- **Real-time push** (hand-rolled WebSocket server, RFC 6455) — the
-  dashboard updates live as telemetry arrives, no polling.
-- **Real authentication** (scrypt password hashing, server-side session
-  tokens with expiry) — not a fake login screen.
-- **Real rule engine** — SLA breach detection, fuel theft detection,
-  low-fuel/smoke/equipment alerts, and predictive-maintenance trend
-  analysis are all computed from actual historical data, not labels.
-- **Real camera detection** — the CCTV module uses your phone's actual
-  camera and runs genuine on-device motion detection; walking in front of
-  it fires a real alert through the same pipeline as every other event.
+* a **ranked do-this-next queue** with deadlines and Kwacha values
+* a **costed redundancy plan** for any load-shedding scenario, which is the
+  kind of plan ZICTA asked Infratel for in November 2025
+* **fuel integrity**: every litre reconciled, with theft, siphoning and
+  failing generators told apart
 
-**Zero external npm/pip dependencies are required to run this project.**
-That was a deliberate engineering choice — see
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#why-zero-dependencies) for
-why, and for the documented upgrade path to Express/Postgres/React/Mosquitto
-for a real production deployment.
+> ⚠️ The demo runs on a **simulated** 12-site fleet with 30 days of physically
+> simulated history. It is not Infratel data, and it is labelled as simulated
+> throughout.
 
 ## Quick start
 
-Requires **Node.js 22.5+** (for built-in `node:sqlite`). No `npm install`
-needed — the backend has zero runtime dependencies.
-
 ```bash
 cd backend
-npm start
-# or: node --experimental-sqlite src/server.js
+npm start                 # Node.js 22.5+; no npm install, no internet needed
+# open http://localhost:3000   (admin@toweriq.demo / ChangeMe123!, pre-filled)
+npm test                  # 36 tests
+npm run demo:reset        # regenerate the simulated fleet
 ```
 
-Then open **http://localhost:3000** in your browser.
+Demo accounts (same password): `admin@` (everything, incl. demo scenario
+controls), `operator@` (alarms, deliveries), `viewer@` (read-only),
+all `@toweriq.demo`.
 
-- Demo login: `admin@towerplatform.demo` / `ChangeMe123!` (pre-filled on
-  the login screen; **change this before any real deployment** — see
-  `docs/DEPLOYMENT.md`)
-- A fleet simulator starts automatically, publishing realistic live
-  telemetry for 4 demo towers over MQTT into the same pipeline real
-  hardware would use.
-- Open **http://localhost:3000/camera-node** on your phone (same WiFi
-  network as your laptop, or via a tunnel — see below) to turn it into a
-  live CCTV node with real on-device motion detection.
+## What's in the box
 
-To try it from a phone on the same network, replace `localhost` with your
-laptop's LAN IP, e.g. `http://192.168.1.23:3000/camera-node`.
-
-## Project structure
-
-```
-tower-platform/
-├── backend/                  # Node.js API + MQTT broker + rule engines (zero deps)
-│   ├── src/
-│   │   ├── server.js         # entry point — wires everything together
-│   │   ├── db/                # SQLite schema, connection, seed data
-│   │   ├── mqtt/               # hand-rolled MQTT broker, client, ingest bridge
-│   │   ├── ws/                 # hand-rolled WebSocket server
-│   │   ├── http/                # router + REST route modules
-│   │   ├── auth/                 # authentication
-│   │   ├── engine/                # rule engine, SLA engine, predictive maintenance
-│   │   └── simulators/             # fleet telemetry simulator
-│   └── tests/                 # automated tests (node:test, zero deps)
-├── frontend/                  # Vanilla JS/CSS SPA (no build step required)
-│   ├── index.html
-│   ├── css/styles.css
-│   └── js/
-│       ├── api.js, ws.js, charts.js, app.js
-│       └── pages/              # dashboard, site detail, alerts, tenancy, reports, login
-├── hardware-simulation/
-│   ├── wokwi/                 # real ESP32 firmware + circuit diagram for Wokwi
-│   └── camera-node/            # phone-camera CCTV page (getUserMedia + motion detection)
-└── docs/                      # architecture, API, database, deployment, testing docs
-```
+| Brief requirement | Where |
+|---|---|
+| Site status, real-time uptime, historical uptime, SLA dashboards | Command Center, Sites, Site page, Reports |
+| Grid / solar / generator (and battery) monitoring, automatic switching visibility, utilisation daily → yearly | Site page timeline, switch log, utilisation; Reports |
+| Diesel level, consumption, runtime, low-fuel & theft alerts | Site page, Fuel Integrity, Alarms |
+| CCTV integration, intrusion/motion, alarm management, unauthorised access | Phone camera node, Alarms (ack/resolve/notes, MTTA/MTTR) |
+| Temperature, smoke, door, motion, equipment health | Site page, Alarms |
+| Tenancy ratio, clients per site, utilisation, revenue opportunity | Commercial |
+| Executive dashboards, NOC-compatible exports, automated SLA reports, predictive maintenance | Command Center, Reports (CSV), predictive indicators |
+| **Beyond the brief: Resilience Engine** (blackout runway, action queue, redundancy planner) | Command Center, Site page, Resilience Planner |
 
 ## Documentation
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system design, data flow, and design rationale
-- [`docs/API.md`](docs/API.md) — REST API and MQTT topic reference
-- [`docs/DATABASE.md`](docs/DATABASE.md) — schema and ER description
-- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — how to deploy this for real
-- [`docs/TESTING.md`](docs/TESTING.md) — how to run and extend the test suite
-- [`docs/HARDWARE_SIMULATION.md`](docs/HARDWARE_SIMULATION.md) — what's simulated, why, and the real-hardware replacement path
-- [`backend/README.md`](backend/README.md), [`frontend/README.md`](frontend/README.md), [`hardware-simulation/README.md`](hardware-simulation/README.md) — module-level detail
-
-## Feature coverage
-
-See [`docs/API.md`](docs/API.md) for the full endpoint list. Summary of
-what's implemented and functional, mapped to the original brief:
-
-| Category | Status |
+| | |
 |---|---|
-| Infrastructure monitoring (status, uptime, SLA dashboards) | ✅ Full |
-| Power monitoring (grid/solar/generator, auto-switching, utilization reports) | ✅ Full |
-| Fuel & generator intelligence (level, consumption, runtime, low-fuel & theft alerts) | ✅ Full |
-| Security monitoring (real camera CCTV, motion/intrusion detection, alarm lifecycle) | ✅ Full |
-| Environmental monitoring (temperature, smoke, door, motion, equipment health) | ✅ Full |
-| Commercial intelligence (tenancy ratio, occupancy, revenue opportunity) | ✅ Full |
-| Reporting & analytics (executive dashboard, SLA reports, CSV export, predictive maintenance) | ✅ Full |
+| [docs/STRATEGY.md](docs/STRATEGY.md) | Problem, users, differentiator choice, roadmap |
+| [docs/RESILIENCE_ENGINE.md](docs/RESILIENCE_ENGINE.md) | The signature innovation: method, validation, limits |
+| [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | 5-minute live demo with expected results |
+| [docs/PITCH.md](docs/PITCH.md) | Presentation outline mapped to judging criteria |
+| [docs/COMMERCIALISATION.md](docs/COMMERCIALISATION.md) | Customers, model, costs, competition, pilot plan |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [API.md](docs/API.md) · [DATABASE.md](docs/DATABASE.md) | Technical reference |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) · [TESTING.md](docs/TESTING.md) · [HARDWARE_SIMULATION.md](docs/HARDWARE_SIMULATION.md) | Operations |
+| [docs/AUDIT.md](docs/AUDIT.md) · [IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md) | What was found, what changed, what remains |
 
-## License
+## Structure
 
-MIT — built as a hackathon prototype / portfolio project.
+```
+backend/   Node.js server: API, MQTT broker, WebSocket, engines, simulator (zero runtime deps)
+frontend/  Vanilla JS console, no build step (served by the backend)
+hardware-simulation/  Wokwi ESP32 firmware, phone camera node
+docs/      Strategy, architecture, demo, pitch, commercialisation
+```
+
+## Honest status
+
+Working prototype with automated tests and a hardened core. **Not yet
+validated on real tower data**; forecast accuracy is what the proposed pilot
+measures. See [IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md) for limits
+and roadmap.
+
+License: MIT.

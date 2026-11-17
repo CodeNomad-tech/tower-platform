@@ -1,134 +1,60 @@
-# Hardware Simulation — What's Simulated, Why, and How to Replace It
+# Hardware Simulation: What Is Simulated, Why, and How to Replace It
 
-This project was built with zero budget for physical hardware. Rather than
-mock features out, every simulated component was built to speak the exact
-same protocol and data contract a real device would use, so swapping in
-real hardware later requires no backend or frontend changes — only a
-different data source.
+TowerIQ was built without tower hardware. Every simulated component speaks
+the **same protocol and data contract** a real device uses (API.md, "MQTT
+device contract"), so moving to hardware changes the data source, not the
+platform. All simulated data is labelled as such in the API (`/api/meta`)
+and the console.
 
-This document follows the format: **(1) what was implemented instead,
-(2) what's different, (3) why the change was necessary, (4) how to
-replace it with the real thing.**
+## 1. Tower telemetry (power, battery, fuel, environment)
 
----
+**Implemented instead**
+* **Fleet simulator** (`backend/src/simulators/fleetSimulator.js`): 12 fictional
+  sites in real Zambian towns, each driven in real time by the site power model
+  (`engine/powerModel.js`) under a load-shedding profile modelled on the shape
+  of 2024 ZESCO schedules. It publishes MQTT exactly like a remote-monitoring
+  unit and resumes from the last persisted state.
+* **Simulated history** (`backend/src/db/history.js`): 30 days generated with the
+  same model, including documented anomalies (an abrupt theft at Ndola, nightly
+  siphoning at Kitwe, generator wear at Chipata, an intrusion at Solwezi). See
+  `db/catalog.js`.
+* **Wokwi ESP32 firmware** (`hardware-simulation/wokwi/sketch.ino`): real firmware
+  with WiFi + PubSubClient publishing the same topics for site `WOKWI-01`
+  (create that site first via the API).
 
-## 1. Tower hardware (sensors, power, fuel gauge)
+**Why:** no hardware budget, and a demo needs months of realistic operations to
+make SLA, utilisation, forecasting and reconciliation meaningful.
 
-**Implemented instead:** Two complementary simulated sources:
-- A real ESP32 firmware sketch (`hardware-simulation/wokwi/sketch.ino`)
-  running in [Wokwi](https://wokwi.com), a browser-based circuit
-  simulator with a genuinely working simulated WiFi stack and real MQTT
-  publishing.
-- A fleet simulator (`backend/src/simulators/fleetSimulator.js`) modeling
-  an entire network of towers with physically-plausible telemetry
-  (diurnal solar curve, proportional fuel drain, realistic power-source
-  switching priority).
-
-**What's different:** No physical sensors exist; sensor values come from
-Wokwi's simulated components (DHT22, PIR, potentiometer standing in for
-a fuel sender unit) or from the fleet simulator's model, rather than real
-transducers reading real physical quantities.
-
-**Why necessary:** No budget for tower hardware, and a hackathon/prototype
-timeline doesn't allow procurement and field installation.
-
-**Replacement path:** Both simulated sources publish to the exact same
-MQTT topics and JSON payload shapes documented in `docs/API.md`
-(`sites/{siteId}/power`, `/fuel`, `/env`, etc.). To go to real hardware:
-1. Flash the logic from `sketch.ino` (or equivalent) onto a real ESP32
-   wired to real sensors (a real fuel-level sender instead of a
-   potentiometer, a real DHT22, etc.).
-2. Point `MQTT_HOST` in the firmware at your deployed broker.
-3. Turn off the fleet simulator for that site (or all sites) by setting
-   `RUN_SIMULATOR=false` in the backend's environment.
-No backend or frontend code changes are required — the ingest pipeline,
-rule engine, and dashboard already consume this exact schema.
-
----
+**How to replace:** point real RMS controllers (or an adapter for their native
+protocol; see the `infratel/tower/*` adapter in `mqtt/ingest.js`) at the broker,
+register the site and its assets, and set `DEMO_MODE=false`. No backend or
+frontend changes are needed.
 
 ## 2. MQTT broker
 
-**Implemented instead:** A hand-rolled MQTT 3.1.1 broker (QoS 0) on
-`node:net`, embedded in the backend process (`backend/src/mqtt/broker.js`).
+**Implemented instead:** a hand-rolled MQTT 3.1.1 broker (QoS 0) embedded in the
+server. It is real wire protocol, so ESP32 PubSubClient or mqtt.js connect to
+it as they would to Mosquitto. Malformed packets disconnect only the
+offending client.
 
-**What's different:** A production deployment would typically use a
-dedicated, battle-tested broker (Mosquitto, HiveMQ, EMQX) rather than an
-embedded custom implementation.
+**Limit:** no authentication or TLS. **Replace with** EMQX, Mosquitto or HiveMQ
+with TLS and per-device credentials; only host and port change.
 
-**Why necessary:** The development environment used to build this project
-had no internet access for `npm install`, so a package like `aedes` or
-`mosquitto` couldn't be installed. A hand-rolled broker was built instead
-so the whole pipeline could be built and verified running, rather than
-delivered as unverified code. It implements the genuine wire protocol
-(CONNECT/CONNACK, SUBSCRIBE/SUBACK, PUBLISH, PINGREQ/PINGRESP,
-DISCONNECT), so it is not a mock — a real MQTT client library on a real
-device connects to it correctly.
+## 3. CCTV
 
-**Replacement path:** Point every device (and the backend's own
-`MqttClient` instances) at a managed broker instead — HiveMQ Cloud or
-EMQX Serverless both have free tiers suitable for a prototype's traffic
-volume, or self-host Mosquitto. Only the `host`/`port` in each client's
-configuration changes; topic names and payloads are unaffected.
+**Implemented instead:** `hardware-simulation/camera-node/`, a phone browser
+page using the real camera with on-device frame differencing. It sends events
+only, never video. It must be paired with an admin-issued device key, and
+sustained motion (3 detections in 30 s) escalates from `motion` to
+`intrusion`.
 
----
+**Replace with** IP cameras or an NVR that emit events by MQTT or webhook, or
+permanently mounted phones. Optionally add on-device person detection
+(TensorFlow.js COCO-SSD) to cut false alarms from animals and vegetation.
 
-## 3. CCTV / security camera
+## 4. Demo users and assumptions
 
-**Implemented instead:** A standalone web page
-(`hardware-simulation/camera-node/index.html`) that uses a phone's real
-camera via `getUserMedia()` and runs genuine on-device motion detection
-(canvas-based frame differencing, zero dependencies) directly in the
-browser — no video is streamed to a server for processing.
-
-**What's different:** A production deployment would use dedicated,
-permanently-mounted IP cameras feeding an NVR (network video recorder)
-with dedicated analytics hardware, rather than a phone browser tab.
-
-**Why necessary:** No budget for CCTV hardware. Phones already have
-cameras, networking, and enough compute to run real-time motion
-detection — using them is not a placeholder, it's a legitimate edge-
-inference architecture (detect on-device, only publish the *event*, not
-raw video, which is also good bandwidth practice for a real deployment).
-
-**What's genuinely real here:** the camera feed is a real live video
-feed (not a stock image or pre-recorded clip); the motion detection
-algorithm genuinely analyzes live frames pixel-by-pixel; walking in front
-of the phone produces a real, verifiable alert through the exact same
-pipeline as every other event type (verified end-to-end during
-development — see `docs/TESTING.md`).
-
-**Optional enhancement path (higher-confidence detection):** The page is
-structured to allow adding [TensorFlow.js](https://www.tensorflow.org/js)
-with a COCO-SSD model (loaded from a CDN) for actual person detection
-instead of generic motion — this distinguishes "a person walked by" from
-"a leaf blew past." This was intentionally left as an optional
-enhancement rather than a hard dependency, so the camera node works fully
-offline (frame-differencing motion detection requires no internet at
-all after the page itself loads); the comment block at the top of
-`camera-node/index.html` explains where to add it.
-
-**Replacement path to real CCTV hardware:** Deploy real IP cameras with
-an NVR that supports MQTT or webhook output (many commercial NVRs do), or
-keep the phone-node pattern but mount phones permanently with a charging
-solution — the backend ingest pipeline doesn't need to change either way,
-since it already consumes `security` events by `event_type` and
-`source`, regardless of what physical device produced them.
-
----
-
-## 4. Auto-provisioned demo data (sites, tenants, admin user)
-
-**Implemented instead:** `backend/src/db/seed.js` creates 4 demo sites,
-9 sample tenants, and one admin user (`admin@towerplatform.demo`) on
-first boot if the database is empty.
-
-**What's different:** obviously, a real deployment has real site/tenant
-data entered by operators, not pre-seeded demo data.
-
-**Why necessary:** so the dashboard is immediately populated for a
-hackathon demo rather than showing an empty state on first load.
-
-**Replacement path:** Set `RUN_SIMULATOR=false`, delete the demo admin
-account, and use the `POST /api/sites` and `POST /api/tenancy/:siteId/tenants`
-endpoints (or a future admin UI) to enter real data. See
-`docs/DEPLOYMENT.md` for the full pre-production checklist.
+Three demo accounts (`admin|operator|viewer@toweriq.demo`) exist only in demo
+mode. Business assumptions (diesel price, SLA credit multiplier, capex) are
+editable placeholders. Replace them before using any Kwacha figure for
+decisions.
