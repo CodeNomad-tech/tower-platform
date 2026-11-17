@@ -92,18 +92,35 @@ function authenticateWs(req, url) {
   return null;
 }
 
+function withTimeout(p, ms) {
+  return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timed out')), ms).unref())]);
+}
+
 async function main({ log = console.log } = {}) {
   require('./db/seed').seed({ log });
 
+  // MQTT: start the embedded broker. If the port is taken (e.g. Mosquitto is
+  // already running), use that broker instead; if nothing answers, keep the
+  // console and API up without live telemetry rather than failing the demo.
   const broker = new MqttBroker({ port: config.MQTT_PORT });
-  await broker.listen();
-  log(`[mqtt] broker listening on :${config.MQTT_PORT}`);
+  try {
+    await broker.listen();
+    log(`[mqtt] broker listening on :${config.MQTT_PORT}`);
+  } catch (e) {
+    log(`[mqtt] could not open :${config.MQTT_PORT} (${e.code || e.message}); trying an existing broker on that port`);
+  }
 
   const wsHub = new WsHub({ authenticate: authenticateWs });
-  const ingestClient = new MqttClient({ port: config.MQTT_PORT, clientId: 'ingest-service' });
-  await ingestClient.connect();
-  startIngest(ingestClient, wsHub);
-  startHardwareIngest(ingestClient, wsHub);
+  let ingestClient = new MqttClient({ port: config.MQTT_PORT, clientId: 'ingest-service' });
+  try {
+    await withTimeout(ingestClient.connect(), 3000);
+    startIngest(ingestClient, wsHub);
+    startHardwareIngest(ingestClient, wsHub);
+  } catch (e) {
+    log(`[mqtt] no broker reachable on :${config.MQTT_PORT} (${e.message}). Running WITHOUT live telemetry; set MQTT_PORT to a free port to fix.`);
+    ingestClient.socket?.destroy();
+    ingestClient = null;
+  }
 
   // Field devices (phone camera nodes) publish detections over the WebSocket;
   // they are re-published onto MQTT so they follow the identical pipeline.
@@ -114,6 +131,7 @@ async function main({ log = console.log } = {}) {
     if (!id || id.kind !== 'device') return; // console clients are receive-only
     let msg; try { msg = JSON.parse(text); } catch { return; }
     if (msg.type !== 'camera-event' || typeof msg.siteId !== 'string' || !ruleEngine.SECURITY_TYPES.has(msg.event_type)) return;
+    if (!ingestClient) return;
     ingestClient.publish(`sites/${msg.siteId}/security`, JSON.stringify({ event_type: msg.event_type, source: 'camera', confidence: Number(msg.confidence) || null }));
   });
 
@@ -149,7 +167,7 @@ async function main({ log = console.log } = {}) {
   timers.push(setInterval(() => { resilience.invalidate(); wsHub.broadcast({ channel: 'forecast' }); }, 60 * 1000));
 
   let simulator = null;
-  if (config.RUN_SIMULATOR) {
+  if (config.RUN_SIMULATOR && ingestClient) {
     const { startFleetSimulator } = require('./simulators/fleetSimulator');
     simulator = await startFleetSimulator({ mqttPort: config.MQTT_PORT });
     log('[simulator] fleet simulator running (SIMULATED telemetry)');
@@ -158,7 +176,7 @@ async function main({ log = console.log } = {}) {
   async function stop() {
     timers.forEach(clearInterval);
     simulator?.stop();
-    ingestClient.end();
+    ingestClient?.end();
     wsHub.closeAll();
     await new Promise((r) => server.close(r));
     await broker.close();

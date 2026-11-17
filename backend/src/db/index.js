@@ -4,7 +4,19 @@
 
 const path = require('node:path');
 const fs = require('node:fs');
-const { DatabaseSync } = require('node:sqlite');
+// Older Node 22.x needs --experimental-sqlite. If the server was started with
+// plain `node src/server.js`, re-launch once with the flag (idea from the team's version).
+let DatabaseSync;
+try {
+  ({ DatabaseSync } = require('node:sqlite'));
+} catch (e) {
+  if (!process.execArgv.includes('--experimental-sqlite') && require.main && require.main.filename) {
+    const { spawnSync } = require('node:child_process');
+    const r = spawnSync(process.execPath, ['--experimental-sqlite', ...process.execArgv, ...process.argv.slice(1)], { stdio: 'inherit' });
+    process.exit(r.status ?? 1);
+  }
+  throw e;
+}
 const config = require('../config');
 
 const DB_PATH = config.DB_PATH;

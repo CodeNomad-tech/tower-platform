@@ -72,12 +72,15 @@ class MqttBroker extends EventEmitter {
   }
 
   listen() {
-    return new Promise((resolve) => {
-      this.server.listen(this.port, () => resolve(this.port));
+    return new Promise((resolve, reject) => {
+      const onError = (e) => reject(e);
+      this.server.once('error', onError);
+      this.server.listen(this.port, () => { this.server.off('error', onError); this.listening = true; resolve(this.port); });
     });
   }
 
   close() {
+    if (!this.listening) return Promise.resolve();
     for (const socket of this.clients.keys()) socket.destroy();
     this.clients.clear();
     return new Promise((resolve) => this.server.close(resolve));
