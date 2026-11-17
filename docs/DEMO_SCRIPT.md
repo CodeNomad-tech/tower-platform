@@ -27,17 +27,17 @@ npm start              # http://localhost:3000
 | # | Time | Say | Do | Expected result |
 |---|---|---|---|---|
 | 1 | 0:00 | "In 2024 ZESCO load-shedding reached 12, then 17 hours a day. A tower survives on battery, solar and diesel. In November 2025 ZICTA gave Infratel 21 days to produce a redundancy plan for **all** towers." | Show the sign-in page (left panel states the purpose). | Judges read the one-line promise. |
-| 2 | 0:30 | "Today's monitoring tells you a tower **has** gone dark. Too late: tenants are already off air and SLA credits are accruing." | Sign in. | Command Center loads. |
-| 3 | 0:45 | "TowerIQ asks a different question: *which towers will go dark, and what do I do first?*" | Point at the red headline and the **Do this next** queue. | Headline names the at-risk towers; queue shows Kasama Hill **critical: act now**. |
+| 2 | 0:30 | "Today's monitoring tells you a tower **has** gone dark. Too late: tenants are already off air and SLA credits are accruing." | Sign in. | Overview loads. |
+| 3 | 0:45 | "TowerIQ asks a different question: *which towers will go dark, and what do I do first?*" | Point at the **map** (green = fine, orange = needs attention, red = urgent), then the cards on the right. | "3 of 12 towers need your attention"; Kasama Hill card says *order 349 litres now*. |
 | 4 | 1:15 | "Kasama has 11% fuel. That looks fine for today, with 0% risk in 24 h. But the truck takes 72 hours to get there. TowerIQ knows that, so it says order **now**." | Hover or point at the action's detail and basis line. | Shows "83% chance of blackout within 72 h… lead time 72 h… order must go out now", with Kwacha value. |
 | 5 | 1:45 | "Every forecast comes from that tower's own data: its grid pattern learned over 14 days, its measured burn rate, 200 simulations." | Click **Open site** on Kitwe Highway. | Runway panel: median time to blackout, survival curve, "Why: generator runs out of diesel (2.6 L/h measured, plus 0.27 L/h unexplained loss)". |
 | 6 | 2:15 | "What if load-shedding goes to 18 hours?" | Click **18 h/day** on the runway panel. | Curve drops sharply; blackout probability rises. |
 | 7 | 2:30 | "That unexplained loss is diesel walking away." | Scroll to **Fuel integrity, 30 days** card. | Opening + delivered − expected burn − closing = ~250 L unexplained, "pattern consistent with siphoning". |
-| 8 | 2:50 | "Let's steal some fuel, live." | In the Settings tab: Site **Livingstone Relay**, Event **Fuel siphoned**, 150 L → **Trigger**. Switch back to Command Center. | Within ~10 s: toast "Fuel theft", alarm badge 1, new critical action **Investigate fuel loss at Livingstone Relay: K3,767**. |
+| 8 | 2:50 | "Let's steal some fuel, live." | In the Settings tab: Site **Livingstone Relay**, Event **Fuel siphoned**, 150 L → **Trigger**. Switch back to Overview. | Within ~10 s: toast "Fuel theft", alarm badge 1, Livingstone turns **red on the map** and gets a card saying the fuel vanished. |
 | 9 | 3:20 | "And the ZICTA question: with K600,000, where do I put batteries and solar first?" | Open **Resilience Planner**. Drag slider 8 → 12 → 18 h/day. | Fleet dark hours/month before → after, capex, monthly benefit, payback; ranked plan reorders (Mansa Lakeside first). |
 | 10 | 4:00 | "That is the time-bound redundancy plan, costed and ranked, in one click." | Click **Export plan CSV**. | CSV downloads with rank, upgrade, capex, avoided dark hours, payback. |
 | 11 | 4:20 | "This scales beyond 12 towers and beyond telecom. Anything with a generator and a grid connection has the same problem." | Optional: show phone camera node raising an intrusion; or Commercial page "Fix power first" vs "Ready to sell". | |
-| 12 | 4:40 | "TowerIQ: know which towers will go dark, before they do." | Return to Command Center. | |
+| 12 | 4:40 | "TowerIQ: know which towers will go dark, before they do." | Return to Overview. | |
 
 ## Recovery plans
 

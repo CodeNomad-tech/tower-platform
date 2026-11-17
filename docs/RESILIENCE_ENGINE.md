@@ -24,8 +24,8 @@ A dashboard of current status cannot produce that plan. A forecast can.
 
 | Output | Question answered | Where in the product |
 |---|---|---|
-| **Blackout runway** | For each tower: probability of going dark in 24 h / 72 h, median time to dark, cause (fuel vs. backup capacity), expected dark hours and Kwacha exposure | Command Center "Fleet runway"; Site page |
-| **Do-this-next queue** | Which refuels, responses and pre-positioning come first, the latest time to dispatch (accounting for each site's delivery lead time), and what each action protects in Kwacha | Command Center |
+| **Blackout runway** | For each tower: probability of going dark in 24 h / 72 h, median time to dark, cause (fuel vs. backup capacity), expected dark hours and Kwacha exposure | Overview "Fleet runway"; Site page |
+| **Do-this-next queue** | Which refuels, responses and pre-positioning come first, the latest time to dispatch (accounting for each site's delivery lead time), and what each action protects in Kwacha | Overview |
 | **Redundancy planner** | Under a load-shedding scenario (0–20 h/day or each site's learned pattern), which battery/solar upgrade at which site removes the most downtime + diesel per Kwacha, funded greedily within a budget, exported as CSV | Resilience Planner |
 
 ## 3. How it works

@@ -21,7 +21,7 @@ const Charts = {
     const bars = darkByHour.map((v, i) => v > 0.001 ? `<rect x="${x(i) + 0.5}" y="${y(v)}" width="${Math.max(1, bw - 1)}" height="${y(0) - y(v)}" fill="var(--crit)" opacity="0.28"/>` : '').join('');
     const pts = survival.map((s) => `${x(s.h).toFixed(1)},${y(s.pPowered).toFixed(1)}`).join(' ');
     const area = `${x(0)},${y(0)} ${pts} ${x(maxH)},${y(0)}`;
-    const tol = `<line x1="${p.l}" x2="${W - p.r}" y1="${y(1 - tolerance)}" y2="${y(1 - tolerance)}" stroke="var(--watch)" stroke-dasharray="4 4" stroke-width="1"/><text x="${W - p.r}" y="${y(1 - tolerance) - 5}" text-anchor="end" style="fill:var(--watch)">risk tolerance ${Math.round(tolerance * 100)}%</text>`;
+    const tol = `<line x1="${p.l}" x2="${W - p.r}" y1="${y(1 - tolerance)}" y2="${y(1 - tolerance)}" stroke="var(--watch)" stroke-dasharray="4 4" stroke-width="1"/><text x="${W - p.r}" y="${y(1 - tolerance) - 5}" text-anchor="end" style="fill:var(--watch)">act before the line drops below here</text>`;
     el.innerHTML = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Probability the site stays powered over the next ${maxH} hours">
       ${g}${bars}<polygon points="${area}" fill="var(--brand)" opacity="0.12"/>
       <polyline points="${pts}" fill="none" stroke="var(--brand)" stroke-width="2.2" stroke-linejoin="round"/>${tol}</svg>`;

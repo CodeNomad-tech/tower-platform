@@ -202,7 +202,7 @@ const App = {
   meta: null,
   cleanups: [],
   nav: [
-    { path: '/', label: 'Command Center', icon: 'command' },
+    { path: '/', label: 'Overview', icon: 'command' },
     { path: '/sites', label: 'Sites', icon: 'sites' },
     { path: '/alarms', label: 'Alarms', icon: 'alarm', badge: true },
     { sep: 'Intelligence' },

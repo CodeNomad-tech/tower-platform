@@ -39,14 +39,14 @@ all `@toweriq.demo`.
 
 | Brief requirement | Where |
 |---|---|
-| Site status, real-time uptime, historical uptime, SLA dashboards | Command Center, Sites, Site page, Reports |
+| Site status, real-time uptime, historical uptime, SLA dashboards | Overview, Sites, Site page, Reports |
 | Grid / solar / generator (and battery) monitoring, automatic switching visibility, utilisation daily → yearly | Site page timeline, switch log, utilisation; Reports |
 | Diesel level, consumption, runtime, low-fuel & theft alerts | Site page, Fuel Integrity, Alarms |
 | CCTV integration, intrusion/motion, alarm management, unauthorised access | Phone camera node, Alarms (ack/resolve/notes, MTTA/MTTR) |
 | Temperature, smoke, door, motion, equipment health | Site page, Alarms |
 | Tenancy ratio, clients per site, utilisation, revenue opportunity | Commercial |
-| Executive dashboards, NOC-compatible exports, automated SLA reports, predictive maintenance | Command Center, Reports (CSV), predictive indicators |
-| **Beyond the brief: Resilience Engine** (blackout runway, action queue, redundancy planner) | Command Center, Site page, Resilience Planner |
+| Executive dashboards, NOC-compatible exports, automated SLA reports, predictive maintenance | Overview, Reports (CSV), predictive indicators |
+| **Beyond the brief: Resilience Engine** (blackout runway, action queue, redundancy planner) | Overview, Site page, Resilience Planner |
 
 ## Documentation
 

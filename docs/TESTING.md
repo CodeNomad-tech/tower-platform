@@ -35,7 +35,7 @@ or uncaught exceptions. The script was a development aid and is not in the repo.
 ## Manual demo check (2 minutes)
 
 1. `npm run demo:reset && npm start`, then sign in as admin.
-2. Command Center headline names at-risk towers; the queue has a critical
+2. Overview headline names at-risk towers; the queue has a critical
    Kasama Hill refuel.
 3. Settings → siphon 150 L at Livingstone Relay → within ~10 s a theft
    alarm and action appear.

@@ -71,21 +71,24 @@ Pages.site = async function (siteId) {
 
     <section class="card" aria-labelledby="h-runway">
       <div class="card-h">
-        <h2 id="h-runway">Blackout runway <span class="sub">If nobody intervenes</span></h2>
+        <h2 id="h-runway">Will this tower stay on? <span class="sub">If nobody does anything</span></h2>
         <div class="seg" role="group" aria-label="Grid scenario">
-          ${[['learned', 'Learned pattern'], ['8', '8 h/day'], ['12', '12 h/day'], ['18', '18 h/day']].map(([v, l]) => h`<button type="button" data-scn="${v}" aria-pressed="${v === scenario}">${l}</button>`)}
+          ${[['learned', 'Normal power cuts'], ['8', '8 h cuts/day'], ['12', '12 h cuts/day'], ['18', '18 h cuts/day']].map(([v, l]) => h`<button type="button" data-scn="${v}" aria-pressed="${v === scenario}">${l}</button>`)}
         </div>
       </div>
       <div class="runway mt" id="runway"><div class="skeleton" style="grid-column:1/-1;margin:16px"></div></div>
     </section>
 
-    <div class="grid g2 mt">
-      <section class="card">
-        <div class="card-h"><h2>Supply, fuel and battery: last 48 h</h2>
+    <section class="card mt">
+        <div class="card-h"><h2>What powered this tower in the last 2 days</h2>
           <div class="legend">${['grid', 'solar', 'battery', 'generator', 'none'].map((k) => srcTag(k))}<span class="src"><i style="background:var(--src-generator);height:2px"></i>Fuel %</span><span class="src"><i style="background:var(--src-battery);height:2px"></i>Battery %</span></div>
         </div>
-        <div class="card-b"><div id="timeline"></div></div>
-      </section>
+        <div class="card-b"><div id="timeline"></div><p class="hint">The coloured strip shows which power source was running. The lines show diesel and battery levels.</p></div>
+    </section>
+
+    <details class="more mt" id="more">
+      <summary>Show more details: power usage, equipment, SLA, fuel accounting, tenants, alarms</summary>
+    <div class="grid g2 mt">
       <section class="card">
         <div class="card-h"><h2>Power source utilisation</h2>
           <div class="seg" role="group" aria-label="Period">${['daily', 'weekly', 'monthly', 'quarterly', 'yearly'].map((p) => h`<button type="button" data-util="${p}" aria-pressed="${p === utilPeriod}">${fmt.label(p)}</button>`)}</div>
@@ -147,7 +150,8 @@ Pages.site = async function (siteId) {
         <div class="card-b flush">${d.switches.length ? h`<table><tbody>${d.switches.map((w) => h`<tr><td class="small muted nowrap">${fmt.dateTime(w.ts)}</td><td>${srcTag(w.from_source)} → ${srcTag(w.to_source)}</td><td class="small dim">${w.reason}</td></tr>`)}</tbody></table>` : empty('No switches recorded')}</div></section>
       <section class="card"><div class="card-h"><h3>Alarms</h3><a class="btn sm" href="#/alarms">All alarms</a></div>
         <div class="card-b flush">${alerts.length ? h`<table><tbody>${alerts.slice(0, 8).map((x) => h`<tr><td>${sevBadge(x.severity)}</td><td><div>${x.message}</div><div class="small dim">${fmt.dateTime(x.created_at)} · ${fmt.label(x.status)}</div></td></tr>`)}</tbody></table>` : empty('No alarms for this site')}</div></section>
-    </div>`.s;
+    </div>
+    </details>`.s;
 
   Charts.timeline(document.getElementById('timeline'), tl.points, { deliveries: tl.deliveries, theft: tl.theft });
 
@@ -157,23 +161,22 @@ Pages.site = async function (siteId) {
     const r = await Api.get(`/sites/${encodeURIComponent(siteId)}/forecast${q}`);
     if (App.stale(rid)) return;
     const f = r.forecast;
-    const big = r.risk === 'dark' ? h`<div class="runway-big" style="color:var(--crit)">Dark now</div>`
-      : f.medianTimeToDarkH != null ? h`<div class="runway-big" style="color:${r.risk === 'critical' ? 'var(--crit)' : 'var(--high)'}">${fmt.hours(f.medianTimeToDarkH)}<br><small>median time to blackout</small></div>`
-        : h`<div class="runway-big" style="color:var(--ok)">&gt; 72 h<br><small>${fmt.pct((1 - f.pDark72h) * 100)} chance it stays powered</small></div>`;
-    const causeText = f.cause === 'fuel' ? `The generator runs out of diesel (burn ${r.burnLph.toFixed(2)} L/h ${r.burnCalibrated ? 'measured' : 'nameplate'}${r.standingLossLph > 0.05 ? `, plus ${r.standingLossLph.toFixed(2)} L/h unexplained loss` : ''}).`
-      : f.cause === 'capacity' ? 'Battery and solar cannot carry the load through the outage blocks, and there is no generator to fall back on.' : 'No blackout expected in the horizon.';
+    const big = r.risk === 'dark' ? h`<div class="runway-big" style="color:var(--crit)">Off air now</div>`
+      : f.medianTimeToDarkH != null ? h`<div class="runway-big" style="color:${r.risk === 'critical' ? 'var(--crit)' : 'var(--high)'}">${fmt.hours(f.medianTimeToDarkH)}<br><small>until it most likely goes dark</small></div>`
+        : h`<div class="runway-big" style="color:var(--ok)">Stays on<br><small>${fmt.pct((1 - f.pDark72h) * 100)} chance it stays on for the next 3 days</small></div>`;
+    const causeText = f.cause === 'fuel' ? `The generator will run out of diesel. It uses about ${r.burnLph.toFixed(1)} litres an hour${r.standingLossLph > 0.05 ? `, and another ${(r.standingLossLph * 24).toFixed(0)} litres a day are disappearing even when it's off` : ''}.`
+      : f.cause === 'capacity' ? "The battery can't last through the power cuts, and there's no generator to take over." : 'It has enough fuel and battery to ride out the power cuts.';
     box.innerHTML = h`
       <div class="runway-facts">
         ${big}
-        <div class="row">${riskBadge(r.risk)}<span class="small muted">${f.scenario === 'learned' ? 'Learned grid pattern' : 'Scenario: ' + f.scenario}</span></div>
-        <div><div class="fact-l">Blackout probability</div><div class="fact-v">${fmt.pct(f.pDark24h * 100)} in 24 h · ${fmt.pct(f.pDark72h * 100)} in 72 h</div></div>
-        ${f.actByH != null && r.risk !== 'dark' ? h`<div><div class="fact-l">Act before risk passes tolerance</div><div class="fact-v">${fmt.hours(f.actByH)} (${fmt.dateTime(new Date(Date.now() + f.actByH * 3600000))})</div></div>` : ''}
+        <div class="row">${riskBadge(r.risk)}<span class="small muted">${f.scenario === 'learned' ? "Using this tower's usual power cuts" : 'What if: ' + f.scenario.replace('h/day', 'hours of cuts a day')}</span></div>
+        <div><div class="fact-l">Chance it goes dark</div><div class="fact-v">${fmt.pct(f.pDark24h * 100)} by tomorrow · ${fmt.pct(f.pDark72h * 100)} within 3 days</div></div>
         <div><div class="fact-l">Why</div><div class="small">${causeText}</div></div>
-        <div><div class="fact-l">Expected cost if ignored (72 h)</div><div class="fact-v">${fmt.hours(f.expectedDarkHours)} dark · ${fmt.k(f.exposureK)}</div></div>
-        <div class="hint">Grid available ${fmt.pct((r.gridAvailability14d || 0) * 100)} of the last 14 days. ${f.runs} Monte Carlo runs of the site power model.</div>
+        ${f.expectedDarkHours > 0.05 ? h`<div><div class="fact-l">If nobody acts</div><div class="fact-v">about ${Math.max(1, Math.round(f.expectedDarkHours))} hours off air · ${fmt.k(f.exposureK)} in penalties</div></div>` : ''}
+        <div class="hint">Based on this tower's own data: ZESCO power was on ${fmt.pct((r.gridAvailability14d || 0) * 100)} of the time over the last 2 weeks. We simulated the next 3 days ${f.runs} times.</div>
       </div>
       <div class="runway-chart">
-        <div class="legend mb"><span class="src"><i style="background:var(--brand)"></i>Probability still powered</span><span class="src"><i style="background:var(--crit);opacity:.4"></i>Probability dark in that hour</span></div>
+        <div class="legend mb"><span class="src"><i style="background:var(--brand)"></i>Chance the tower is still on</span><span class="src"><i style="background:var(--crit);opacity:.4"></i>Chance it is dark in that hour</span></div>
         <div id="survival"></div>
       </div>`.s;
     Charts.survival(document.getElementById('survival'), f.survival, f.darkProbabilityByHour);
@@ -197,9 +200,11 @@ Pages.site = async function (siteId) {
     loadUtil().catch(Toast.error.bind(Toast));
   }));
 
-  await Promise.all([loadRunway(), loadUtil()]);
+  await loadRunway();
+  let utilLoaded = false;
+  document.getElementById('more').addEventListener('toggle', (e) => { if (e.target.open && !utilLoaded) { utilLoaded = true; loadUtil().catch(Toast.error.bind(Toast)); } });
   liveRefresh(['forecast', 'status'], () => loadRunway().catch(() => {}), 2000);
-  const redraw = debounce(() => { if (!App.stale(rid)) { loadRunway().catch(() => {}); loadUtil().catch(() => {}); Charts.timeline(document.getElementById('timeline'), tl.points, { deliveries: tl.deliveries, theft: tl.theft }); } }, 300);
+  const redraw = debounce(() => { if (!App.stale(rid)) { loadRunway().catch(() => {}); if (utilLoaded) loadUtil().catch(() => {}); Charts.timeline(document.getElementById('timeline'), tl.points, { deliveries: tl.deliveries, theft: tl.theft }); } }, 300);
   window.addEventListener('resize', redraw); window.addEventListener('themechange', redraw);
   App.onLeave(() => { window.removeEventListener('resize', redraw); window.removeEventListener('themechange', redraw); });
 };

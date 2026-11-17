@@ -1,10 +1,32 @@
-/* Command Center: answers "what needs my attention, and what do I do first?" in one screen. */
+/* Home screen ("Overview"). Deliberately minimal:
+   1. one sentence saying how the fleet is,
+   2. a map of Zambia with every tower as a coloured dot,
+   3. a short list of the towers that need help, each in plain words with one clear action.
+   Everything else lives on other pages. */
 'use strict';
 
+// Plain-language helpers ------------------------------------------------------
+const Plain = {
+  // "in about 30 hours (tomorrow ~16:00)"
+  when(hours) {
+    if (hours == null) return 'not in the next 3 days';
+    if (hours < 1) return 'within the hour';
+    const t = new Date(Date.now() + hours * 3600000);
+    const today = new Date(); const tom = new Date(Date.now() + 86400000);
+    const day = t.toDateString() === today.toDateString() ? 'today' : t.toDateString() === tom.toDateString() ? 'tomorrow' : t.toLocaleDateString('en-GB', { weekday: 'long' });
+    const hh = t.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const rough = hours < 48 ? `${Math.round(hours)} hours` : `${(hours / 24).toFixed(1)} days`;
+    return `in about ${rough} (${day} ~${hh})`;
+  },
+  // Traffic-light state for a site, used by map dots and cards.
+  light(risk) { return risk === 'dark' || risk === 'critical' ? 'red' : risk === 'high' || risk === 'watch' ? 'orange' : 'green'; },
+};
+
 Pages.command = async function () {
-  App.setTitle('Command Center');
+  App.setTitle('Overview');
   const page = document.getElementById('page');
   const rid = App.rid;
+  let showFine = false;
 
   async function load() {
     const [runway, actions, exec] = await Promise.all([
@@ -15,130 +37,120 @@ Pages.command = async function () {
     bind();
   }
 
-  function headline(runway, actions) {
-    const f = runway.fleet;
-    const atRisk = runway.sites.filter((s) => s.risk === 'critical' || s.risk === 'high');
-    if (f.darkNow || atRisk.length) {
-      const names = [...runway.sites.filter((s) => s.risk === 'dark'), ...atRisk].slice(0, 3).map((s) => s.name);
-      return h`
-        <div class="headline" role="status">
-          <div class="headline-icon">${ICONS.warn}</div>
-          <div>
-            <div class="big">${f.darkNow ? h`<em>${f.darkNow} tower${f.darkNow > 1 ? 's' : ''} dark now.</em> ` : ''}
-              <em>${atRisk.length} tower${atRisk.length === 1 ? '' : 's'}</em> likely to go dark in the next 72 h${names.length ? ': ' + names.join(', ') : ''}.</div>
-            <div class="why">${actions.actions.length} recommended action${actions.actions.length === 1 ? '' : 's'} below protect an estimated <b>${fmt.k(actions.totalValueK)}</b> in SLA credits and diesel.
-              Forecast: ${runway.sites.length} sites × 200 simulations each under the grid pattern each site learned over the last 14 days.</div>
-          </div>
-        </div>`;
-    }
-    return h`
-      <div class="headline"><div class="headline-icon okc">${ICONS.check}</div>
-        <div><div class="big"><em class="okc">All ${f.sites} towers</em> are expected to stay powered for the next 72 hours.</div>
-        <div class="why">No blackout risk above tolerance. ${f.onBackup} sites are currently running on backup power.</div></div></div>`;
+  // One card per site that needs help (actions grouped by site, most urgent first).
+  function helpCards(runway, actions) {
+    const bySite = new Map();
+    for (const a of actions.actions) { if (!bySite.has(a.siteId)) bySite.set(a.siteId, []); bySite.get(a.siteId).push(a); }
+    return [...bySite.entries()].map(([siteId, acts]) => ({ site: runway.sites.find((s) => s.siteId === siteId), acts }));
   }
 
-  function actionHtml(a) {
-    const d = fmt.until(a.deadline);
-    const canDeliver = a.kind === 'refuel' || (a.kind === 'restore' && a.litres);
-    return h`
-      <div class="action p-${a.priority}" id="act-${a.id.replace(/[^a-z0-9]/gi, '_')}">
-        <div class="bar"></div>
-        <div>
-          <div class="action-title">${a.title}</div>
-          <div class="action-detail">${a.detail}</div>
-          <div class="action-meta">
-            ${a.valueK ? h`<span>Value protected <b>${fmt.k(a.valueK)}</b></span>` : ''}
-            <span title="${a.basis}">Basis: ${a.basis}</span>
-          </div>
-        </div>
-        <div class="action-side">
-          <span class="badge ${a.priority === 'critical' ? 'b-crit' : a.priority === 'high' ? 'b-high' : 'b-watch'}">${fmt.label(a.priority)}</span>
-          <span class="deadline ${d.over ? 'over' : ''}">${a.kind === 'alarm' ? 'Respond ' : 'Act '}${d.text}</span>
-          <a class="btn sm" href="#/site/${encodeURIComponent(a.siteId)}">Open site</a>
-        </div>
-        ${canDeliver && Api.can('operator') ? h`
-          <form class="action-form" data-deliver="${a.siteId}">
-            <label class="small muted" for="l-${a.siteId}">Delivery arrived?</label>
-            <input class="input" id="l-${a.siteId}" name="litres" type="number" min="1" step="1" value="${a.litres || ''}" aria-label="Litres delivered">
-            <button class="btn sm primary" type="submit">Log delivery</button>
-          </form>` : ''}
-        ${a.kind === 'alarm' && Api.can('operator') ? h`<div class="action-form"><button class="btn sm" data-ack="${a.alertId}">Acknowledge alarm</button></div>` : ''}
-      </div>`;
+  function sentence(a, s) {
+    const f = s?.forecast;
+    if (a.kind === 'restore') return h`<b>This tower is off air right now.</b> Phones in the area have no signal. ${a.litres ? `Send ${a.litres} litres of diesel immediately.` : 'Send a mobile generator.'}`;
+    if (a.kind === 'refuel') return h`<b>It will run out of diesel ${Plain.when(f?.medianTimeToDarkH ?? f?.fuelOutMedianH)}.</b> A fuel truck takes about ${s.assets.refuel_lead_h} hours to get there, so <b>order ${a.litres} litres ${fmt.until(a.deadline).over ? 'now' : Plain.when((Date.parse(a.deadline) - Date.now()) / 3600000)}</b>.`;
+    if (a.kind === 'capacity') return h`<b>Its battery can't last through the power cuts</b>, and it has no generator to fall back on. Expect it to go dark ${Plain.when(f?.medianTimeToDarkH)}. Bring a mobile generator.`;
+    if (a.kind === 'alarm') return h`<b>${a.detail}</b>. Someone should check the site.`;
+    return h`${a.detail}`;
   }
 
-  function siteRow(s) {
-    const f = s.forecast;
-    const ttd = s.risk === 'dark' ? h`<div class="v" style="color:var(--crit)">Dark</div><div class="p">${fmt.k(s.exposurePerDarkHourK)}/h exposure</div>`
-      : f.medianTimeToDarkH != null ? h`<div class="v" style="color:${s.risk === 'critical' ? 'var(--crit)' : 'var(--high)'}">${fmt.hours(f.medianTimeToDarkH)}</div><div class="p">${fmt.pct(f.pDark24h * 100)} risk in 24 h</div>`
-        : f.pDark72h > 0.02 ? h`<div class="v">&gt; 72 h</div><div class="p">${fmt.pct(f.pDark72h * 100)} risk in 72 h</div>`
-          : h`<div class="v" style="color:var(--ok)">Secure</div><div class="p">&gt; 72 h runway</div>`;
+  function card({ site, acts }) {
+    const a = acts[0];
+    const light = a.kind === 'alarm' ? 'red' : Plain.light(site?.risk);
     return h`
-      <a class="site-row" href="#/site/${encodeURIComponent(s.siteId)}">
-        <div><div class="nm">${s.name}</div><div class="rg">${s.siteId} · ${s.region}</div></div>
-        <div>${riskBadge(s.risk)}</div>
-        <div class="mini hide-sm">${srcTag(s.state.activeSource)}<span>${s.state.gridUp ? 'Grid available' : 'Grid off'}</span></div>
-        <div class="mini hide-sm">
-          ${s.assets.gen_kw > 0 ? h`<span>Fuel ${fmt.pct(s.state.fuelPct)} · ${fmt.litres(s.state.fuelL)}</span>${meter(s.state.fuelPct)}` : h`<span>No generator</span>`}
-          ${s.assets.battery_kwh > 0 ? h`<span>Battery ${fmt.pct(s.state.socPct)}</span>${meter(s.state.socPct)}` : ''}
+      <article class="help-card l-${light}">
+        <div class="help-head">
+          <span class="dot-l l-${light}" aria-hidden="true"></span>
+          <div><h3>${a.siteName}</h3><div class="small dim">${site?.region || ''}</div></div>
+          ${a.valueK ? h`<span class="help-money" title="${a.basis}">${fmt.k(a.valueK)} at stake</span>` : ''}
         </div>
-        <div class="ttd">${ttd}</div>
+        <p class="help-text">${sentence(a, site)}</p>
+        ${acts.length > 1 ? h`<p class="small muted">Also: ${acts.slice(1).map((x) => x.title).join('; ')}</p>` : ''}
+        <div class="row">
+          ${(a.kind === 'refuel' || (a.kind === 'restore' && a.litres)) && Api.can('operator')
+            ? h`<form class="row" data-deliver="${a.siteId}"><input class="input" name="litres" type="number" min="1" value="${a.litres}" aria-label="Litres delivered" style="width:100px"><button class="btn primary" type="submit">Fuel delivered</button></form>` : ''}
+          ${a.kind === 'alarm' && Api.can('operator') ? h`<button class="btn primary" data-ack="${a.alertId}">I'm on it</button>` : ''}
+          <a class="btn" href="#/site/${encodeURIComponent(a.siteId)}">See tower</a>
+        </div>
+      </article>`;
+  }
+
+  function map(runway, needIds) {
+    const z = ZAMBIA;
+    const dots = runway.sites.filter((s) => s.latitude != null).map((s) => {
+      const [x, y] = z.xy(s.longitude, s.latitude);
+      const l = needIds.has(s.siteId) && Plain.light(s.risk) === 'green' ? 'orange' : Plain.light(s.risk);
+      const label = l !== 'green';
+      return `<a href="#/site/${encodeURIComponent(s.siteId)}" aria-label="${esc(s.name)}: ${l === 'green' ? 'fine' : l === 'orange' ? 'needs attention' : 'urgent'}">
+        <title>${esc(s.name)}</title>
+        ${l !== 'green' ? `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="16" class="ring l-${l}"/>` : ''}
+        <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${label ? 9 : 7}" class="pin l-${l}"/>
       </a>`;
+    }).join('');
+    // Labels go in a separate layer above every dot so neighbouring towers never cover them.
+    const labels = runway.sites.filter((s) => s.latitude != null).map((s) => {
+      const l = needIds.has(s.siteId) && Plain.light(s.risk) === 'green' ? 'orange' : Plain.light(s.risk);
+      if (l === 'green') return '';
+      const [x, y] = z.xy(s.longitude, s.latitude);
+      return `<text x="${(x + 14).toFixed(1)}" y="${(y + 5).toFixed(1)}" class="pin-label" aria-hidden="true">${esc(s.name)}</text>`;
+    }).join('');
+    return raw(`<svg class="map" viewBox="-10 -10 ${z.W + 120} ${z.H + 20}" role="img" aria-label="Map of Zambia showing each tower's status">
+      <path d="${z.path}" class="land"/>${dots}<g style="pointer-events:none">${labels}</g></svg>`);
   }
 
   function render(runway, actions, exec) {
-    const f = runway.fleet;
+    const cards = helpCards(runway, actions);
+    const needIds = new Set(cards.map((c) => c.site?.siteId || c.acts[0].siteId));
+    const fine = runway.sites.filter((s) => !needIds.has(s.siteId));
+    const n = cards.length;
+    const head = n === 0
+      ? h`<h2 class="hero-line ok">All ${runway.sites.length} towers are fine for the next 3 days.</h2>`
+      : h`<h2 class="hero-line">${n} of ${runway.sites.length} towers need your attention.</h2>`;
     return h`
-      ${headline(runway, actions)}
-      <div class="grid g4 mt">
-        <div class="card kpi ${f.darkNow ? 'crit' : 'ok'}"><div class="kpi-label">Towers dark now</div><div class="kpi-value">${f.darkNow} <span class="small muted">/ ${f.sites}</span></div><div class="kpi-sub">${f.onBackup} on backup · ${f.onGrid} on grid</div></div>
-        <div class="card kpi ${f.atRisk24h ? 'high' : 'ok'}"><div class="kpi-label">Blackout risk ≥15% in 24 h</div><div class="kpi-value">${f.atRisk24h}</div><div class="kpi-sub">${fmt.k(f.exposureK72h)} expected SLA exposure (72 h)</div></div>
-        <div class="card kpi ${exec.slaCompliant < exec.totalSites ? 'high' : 'ok'}"><div class="kpi-label">Availability, last 30 days</div><div class="kpi-value">${fmt.pct(exec.availability30d, 2)}</div><div class="kpi-sub">${exec.slaCompliant}/${exec.totalSites} sites meet SLA · ${fmt.int(exec.downtimeHours30d)} h down</div></div>
-        <div class="card kpi ${exec.fuelUnexplainedL30d > 0 ? 'crit' : 'ok'}"><div class="kpi-label">Unexplained diesel loss, 30 days</div><div class="kpi-value">${fmt.k(exec.fuelUnexplainedK30d)}</div><div class="kpi-sub">${fmt.litres(exec.fuelUnexplainedL30d)} · <a href="#/fuel">see where</a></div></div>
-      </div>
-
-      <div class="grid g-side mt">
-        <section class="card" aria-labelledby="h-actions">
-          <div class="card-h"><h2 id="h-actions">Do this next</h2><span class="sub">Ranked by urgency, then deadline</span></div>
-          <div class="card-b flush">${actions.actions.length ? actions.actions.map(actionHtml) : empty('Nothing needs action', 'Every site has enough fuel and backup for the next 72 hours.')}</div>
+      ${head}
+      <div class="overview">
+        <section class="card map-card" aria-label="Map">
+          <div class="card-b">${map(runway, needIds)}
+            <div class="legend map-legend">
+              <span><span class="dot-l l-green"></span>Fine</span>
+              <span><span class="dot-l l-orange"></span>Needs attention</span>
+              <span><span class="dot-l l-red"></span>Urgent or off air</span>
+            </div>
+          </div>
         </section>
-        <section class="card" aria-labelledby="h-runway">
-          <div class="card-h"><h2 id="h-runway">Fleet runway</h2><span class="sub">Time until each tower goes dark if nobody acts</span></div>
-          <div class="card-b flush">
-            <div class="site-head"><span>Site</span><span>Risk</span><span class="hide-sm">Supply now</span><span class="hide-sm">Fuel / battery</span><span style="text-align:right">Runway</span></div>
-            ${runway.sites.map(siteRow)}
+        <section aria-label="Towers that need help">
+          <div class="stack">${n ? cards.map(card) : h`<div class="card card-b">${empty('Nothing to do right now', 'Every tower has enough fuel and battery for the next 3 days.')}</div>`}</div>
+          <div class="fine-line">
+            <button type="button" class="linkish" data-toggle-fine aria-expanded="${showFine}">${fine.length} other tower${fine.length === 1 ? ' is' : 's are'} fine ${showFine ? '▴' : '▾'}</button>
+            ${showFine ? h`<div class="chips">${fine.map((s) => h`<a class="chip" href="#/site/${encodeURIComponent(s.siteId)}"><span class="dot-l l-green"></span>${s.name}</a>`)}</div>` : ''}
           </div>
         </section>
       </div>
-
-      <section class="card mt" aria-labelledby="h-feed">
-        <div class="card-h"><h2 id="h-feed">Live events</h2><span class="sub">Power switches, generator starts and alarms as they happen</span></div>
-        <div class="card-b flush feed" id="feed">${feedHtml()}</div>
-      </section>`;
-  }
-
-  function feedHtml() {
-    if (!Live.feed.length) return empty('Waiting for events', 'Telemetry streams every 10 seconds. Switches and alarms appear here.');
-    return raw(Live.feed.slice(0, 30).map((e) => h`<div class="feed-item"><time>${e.t.toLocaleTimeString('en-GB')}</time><span style="${e.tone === 'critical' ? 'color:var(--crit)' : e.tone === 'ok' ? 'color:var(--ok)' : ''}">${e.text}</span></div>`.s).join(''));
+      <div class="strip">
+        <span>Off air now: <b>${runway.fleet.darkNow}</b></span>
+        <span>Uptime this month: <b>${fmt.pct(exec.availability30d, 1)}</b></span>
+        <span>Diesel missing this month: <b>${fmt.k(exec.fuelUnexplainedK30d)}</b> <a href="#/fuel">why?</a></span>
+        <span class="dim">Simulated demo data</span>
+      </div>`;
   }
 
   function bind() {
+    page.querySelector('[data-toggle-fine]')?.addEventListener('click', () => { showFine = !showFine; load(); });
     page.querySelectorAll('form[data-deliver]').forEach((form) => form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const litres = Number(new FormData(form).get('litres'));
-      const btn = form.querySelector('button'); btn.disabled = true;
+      const btn = form.querySelector('button'); btn.disabled = true; btn.textContent = 'Saving…';
       try {
-        await Api.post('/fuel/deliveries', { siteId: form.dataset.deliver, litres, reference: 'Logged from Command Center' });
-        Toast.show('Delivery logged', `${litres} L at ${form.dataset.deliver}. Runway recalculates on the next telemetry tick.`, 'ok');
+        await Api.post('/fuel/deliveries', { siteId: form.dataset.deliver, litres, reference: 'Logged from Overview' });
+        Toast.show('Delivery recorded', `${litres} litres at ${form.dataset.deliver}. The tower's status updates within a few seconds.`, 'ok');
         setTimeout(load, 11000);
-      } catch (err) { Toast.error(err); btn.disabled = false; }
+      } catch (err) { Toast.error(err); btn.disabled = false; btn.textContent = 'Fuel delivered'; }
     }));
     page.querySelectorAll('[data-ack]').forEach((b) => b.addEventListener('click', async () => {
       b.disabled = true;
-      try { await Api.post(`/alerts/${b.dataset.ack}/acknowledge`); Toast.show('Alarm acknowledged', '', 'ok'); load(); } catch (err) { Toast.error(err); b.disabled = false; }
+      try { await Api.post(`/alerts/${b.dataset.ack}/acknowledge`); Toast.show('Noted', 'Alarm marked as being handled.', 'ok'); load(); } catch (err) { Toast.error(err); b.disabled = false; }
     }));
   }
 
   await load();
   liveRefresh(['alert', 'status', 'forecast'], load, 2000);
-  App.onLeave(Live.on(() => { const el = document.getElementById('feed'); if (el) el.innerHTML = feedHtml().s; }));
 };
