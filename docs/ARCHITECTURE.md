@@ -3,132 +3,90 @@
 ## System overview
 
 ```
-┌─────────────────────┐        ┌──────────────────────┐
-│  Wokwi ESP32 node    │        │  Fleet simulator      │
-│  (real firmware,     │        │  (Node process,       │
-│  real WiFi+MQTT)     │        │  same MQTT schema)    │
-└──────────┬───────────┘        └───────────┬───────────┘
-           │ MQTT (real 3.1.1 protocol)      │
-           └───────────────┬──────────────────┘
-                            ▼
-                  ┌───────────────────┐
-                  │  Embedded MQTT     │   backend/src/mqtt/broker.js
-                  │  broker (:1883)    │
-                  └─────────┬──────────┘
-                            │
-                            ▼
-                  ┌───────────────────┐
-                  │  Ingest service    │   backend/src/mqtt/ingest.js
-                  │  (subscribes to    │
-                  │  all topics)       │
-                  └─────────┬──────────┘
-                            │
-              ┌─────────────┼─────────────────┐
-              ▼             ▼                 ▼
-     ┌────────────┐ ┌───────────────┐ ┌───────────────┐
-     │  SQLite DB  │ │  Rule engine   │ │  WebSocket hub │
-     │ (node:sqlite│ │ (alerts, SLA,  │ │  (:3000/ws)    │
-     │  built-in)  │ │  predictive)   │ │                │
-     └─────────────┘ └───────────────┘ └───────┬────────┘
-                                                 │ live JSON events
-                                                 ▼
-                                    ┌────────────────────────┐
-                                    │  Frontend SPA            │
-                                    │  (vanilla JS, no build)  │
-                                    │  + Phone camera node      │
-                                    │  (getUserMedia, on-device │
-                                    │  motion detection)        │
-                                    └────────────────────────┘
+ Field (real or simulated)                     TowerIQ server (one Node.js process, zero npm dependencies)
+ ─────────────────────────                     ────────────────────────────────────────────────────────────
+ RMS controller / Wokwi ESP32 ──MQTT──┐
+ Fleet simulator (demo mode) ──MQTT──┼──► Embedded MQTT broker :1883 ──► Ingest (validate, persist)
+ Vendor firmware (infratel/tower/*) ─┘                                       │
+ Phone camera node ──WebSocket (device key)──► re-published to MQTT ─────────┤
+                                                                             ▼
+                                       ┌──────────── Rule engine ──► alarms ──┐
+                          SQLite ◄─────┤ SLA engine (status transitions)      ├──► WebSocket hub :3000/ws ──► Console (SPA)
+                     (node:sqlite,     │ Predictive engine (significant trends)│     (session-token auth)
+                      WAL mode)        │ Fuel integrity (litre reconciliation) │
+                                       └── Resilience Engine (power model +   ─┘
+                                           learned grid Markov + Monte Carlo) ──► REST API /api/* (Bearer auth, roles)
 ```
 
-Every device — real (Wokwi ESP32) or simulated (fleet simulator) —
-publishes to the **same MQTT topic scheme and JSON payload shape**
-(documented in `docs/API.md`). The backend cannot distinguish a real
-device from a simulated one, which is the point: the pipeline is
-identical whether or not physical hardware exists yet.
+### Components
 
-The phone camera node is the one component that can't speak MQTT
-directly (browsers can't open raw TCP sockets), so it publishes over the
-same WebSocket connection used for dashboard updates; the backend
-re-publishes those events onto the MQTT bus so they still flow through
-the identical ingest → rule engine → alert pipeline as everything else.
+| Module | Responsibility |
+|---|---|
+| `src/server.js` | Wires HTTP, static files (strict CSP), WebSocket, broker, ingest, background jobs, simulator. Graceful shutdown. |
+| `src/config.js` | All runtime configuration from environment variables with demo-safe defaults. |
+| `src/db/` | Schema (idempotent DDL), connection (WAL, statement cache, transactions), demo seed, demo catalog, simulated-history generator. |
+| `src/mqtt/` | Hand-rolled MQTT 3.1.1 broker/client (QoS 0, malformed packets drop the client); `ingest.js` validates and routes telemetry. |
+| `src/ws/hub.js` | RFC 6455 WebSocket with handshake authentication: users receive events, devices may only send. |
+| `src/http/` | Express-like router (body limit, JSON errors, validation helpers) and route modules. |
+| `src/auth/` | scrypt passwords, server-side sessions, roles (viewer < operator < admin), login throttling, audit log. |
+| `src/engine/powerModel.js` | The site energy balance ("digital twin"): one function used for history, live simulation and forecasting. |
+| `src/engine/gridModel.js` | Load-shedding schedules (simulation/scenarios) and the learned hourly Markov chain (forecasting). |
+| `src/engine/resilience.js` | Runway forecast, action queue, upgrade planner. See [RESILIENCE_ENGINE.md](RESILIENCE_ENGINE.md). |
+| `src/engine/fuelIntegrity.js` | Litre reconciliation and loss classification. |
+| `src/engine/predictiveEngine.js` | Burn-rate and runtime trends with a significance test; fuel flow calibration. |
+| `src/engine/ruleEngine.js`, `slaEngine.js` | Alarms with de-duplication and auto-resolve; availability from status transitions. |
+| `src/settings.js` | Editable business assumptions (diesel price, SLA credit multiplier, capex costs, policies). |
+| `src/simulators/fleetSimulator.js` | Real-time simulated RMS for demo sites + admin scenario controls. |
+| `frontend/` | Vanilla JS SPA, no build step. `core.js` (escaping templates, API, live feed, router), `charts.js` (SVG), `pages/*`. |
 
-## Why zero dependencies
+## Key design decisions
 
-This build environment has no internet access for `npm install`, so
-rather than deliver untested code written on faith, every layer was
-built on Node.js built-ins and verified running in this session:
+1. **One physics model, three uses.** History, live simulation and forecasts
+   all call `powerModel.step`. The demo cannot show behaviour the forecaster
+   would not predict, and the forecaster can be unit-tested against simple
+   energy arithmetic.
+2. **Learn from the site, don't hard-code the grid.** Forecasts use a Markov
+   chain estimated from each site's own telemetry. Scenarios (8/12/18 h/day)
+   are explicit "what-ifs", never confused with the learned forecast.
+3. **Nameplate vs. measured burn.** The forecast uses the measured drain (what
+   the tank really loses). Fuel Integrity uses the nameplate rate, so theft is
+   not absorbed into "normal".
+4. **Reads never write.** GET endpoints compute only. Breach records and
+   maintenance flags are persisted by background jobs at most once per day per
+   site.
+5. **Same-origin, defence in depth.** Console and API share an origin. The
+   strict CSP has `script-src 'self'` and no inline handlers. All dynamic text
+   is escaped in a tagged template. CSV cells are neutralised against formula
+   injection. Sessions are stored in `sessionStorage`, not `localStorage`.
+6. **Zero runtime dependencies.** The whole system starts with `npm start` and
+   no internet access, which matters for a venue demo and for low-bandwidth
+   deployments. Production upgrade paths are listed below.
 
-- **HTTP server & router** — `node:http` + a small hand-rolled router
-  (`backend/src/http/router.js`), API-compatible in shape with Express.
-- **Database** — `node:sqlite` (built into Node 22.5+), a real embedded
-  SQL database, not an in-memory mock.
-- **MQTT broker & client** — hand-rolled implementation of MQTT 3.1.1
-  (QoS 0) on `node:net` (`backend/src/mqtt/broker.js`, `client.js`).
-  Real wire protocol — a genuine ESP32 running PubSubClient.h connects to
-  it exactly as it would to Mosquitto.
-- **WebSocket server** — hand-rolled RFC 6455 implementation on
-  `node:http`'s `upgrade` event (`backend/src/ws/hub.js`).
-- **Auth** — `node:crypto` scrypt password hashing + random session
-  tokens (no `bcrypt` or `jsonwebtoken` package needed).
-- **Frontend** — plain HTML/CSS/JS, no bundler, no framework, no build
-  step. Charts are a small hand-rolled canvas renderer
-  (`frontend/js/charts.js`).
+## Data flow: telemetry to action
 
-This has a real benefit beyond working without internet access: **the
-entire project runs with just `node server.js`**, which is valuable for
-a live hackathon demo where venue WiFi is unreliable.
+1. A device publishes `sites/CPB-007/fuel {"level_pct": 9.1, "generator_on": true}`.
+2. Ingest validates the site and value ranges, inserts into `fuel_readings`,
+   and calls `ruleEngine.evaluateFuel`. The rules convert to litres using the
+   tank size, check the low-fuel threshold, and check for a sudden drop with
+   the generator off over 15 minutes.
+3. New alarms are broadcast on the WebSocket; the console updates its badge,
+   toasts and queue.
+4. Every minute the forecast cache is invalidated and clients are nudged. The
+   next runway request recalibrates (burn rate, standing loss, grid Markov)
+   and re-runs the Monte Carlo.
+5. The action queue converts forecasts and open security alarms into ranked,
+   deadline-bound actions valued in Kwacha.
+6. The operator logs a delivery. It is recorded with user and time in the
+   audit log; in demo mode the simulated tank fills, and the next tick
+   changes the forecast.
 
-### Production upgrade path
+## Production upgrade path
 
-None of the above is a permanent constraint — it's a deliberate choice
-for portability, documented per-module with a clear swap path:
-
-| Component | Current (zero-dep) | Production upgrade |
+| Component | Now | Production |
 |---|---|---|
-| HTTP framework | Hand-rolled router | Express or Fastify (the router API shape mirrors Express closely — migration is mechanical) |
-| Database | SQLite (`node:sqlite`) | PostgreSQL — see `docs/DATABASE.md` for the migration notes; the SQL used is plain, portable SQL |
-| MQTT broker | Embedded hand-rolled broker | Managed broker (HiveMQ Cloud, EMQX Serverless free tiers) or self-hosted Mosquitto; devices need zero code changes, just a different host/port |
-| Auth | Session tokens in SQLite | Same approach works fine at scale; alternatively JWT via `jsonwebtoken` if statelessness is needed |
-| Frontend | Vanilla JS SPA | React/Vite, if the team wants component reuse and a richer ecosystem — the API/WS contracts don't change |
-| CCTV | Phone browser + on-device motion detection | Dedicated IP cameras with an NVR, or the same phone-node pattern deployed permanently with a mounted device |
-
-## Data flow: how a value becomes an alert
-
-1. A device (real or simulated) publishes JSON telemetry to a topic like
-   `sites/site-001/fuel`.
-2. The embedded MQTT broker forwards it to the ingest service, which is
-   subscribed to `sites/+/fuel` (and all other channels).
-3. The ingest service persists the reading to `fuel_readings` and calls
-   `ruleEngine.evaluateFuel()`.
-4. The rule engine checks the reading against thresholds (and, for theft
-   detection, against the site's fuel history over the trailing window)
-   and — if warranted — inserts a row into `alerts`.
-5. The new alert is broadcast over the WebSocket hub to every connected
-   dashboard client.
-6. The frontend's `Live.on()` listener receives the event and updates the
-   relevant UI (site card badge, alert feed) without a page reload.
-7. An operator acknowledges/resolves the alert from the UI; that state
-   change is persisted, and feeds into the real
-   mean-time-to-acknowledge/resolve metric on the Alerts page.
-
-This is the same pipeline for every alert type — low fuel, fuel theft,
-smoke, intrusion (camera or door sensor), SLA breach, and predictive
-maintenance flags — by design, so adding a new alert type is "one more
-rule function," not new plumbing.
-
-## Realism in the fleet simulator
-
-The simulator (`backend/src/simulators/fleetSimulator.js`) deliberately
-avoids random noise:
-
-- Solar output follows an actual diurnal curve (`cos` bell curve peaking
-  at local noon, zero outside 6am–6pm).
-- Fuel only drains while the generator is actually running, at a fixed
-  rate — not randomly.
-- Power source switching follows a real priority order (grid > solar >
-  generator) based on a simulated grid-up/grid-down state.
-- Anomaly events (a brief grid outage, an occasional theft-pattern fuel
-  drop, rare smoke events) are injected deliberately and infrequently —
-  documented here, not hidden — specifically to exercise the alert
-  pipeline in a demo.
+| Database | SQLite (WAL) | PostgreSQL + TimescaleDB hypertables for readings; retention/rollups |
+| MQTT | Embedded broker, no auth | EMQX/Mosquitto/HiveMQ with TLS and per-device credentials; ACLs per site topic |
+| Auth | Sessions + roles | Plus SSO (OIDC) for staff; per-tenant viewer accounts |
+| Forecast compute | In-process, cached | Worker pool / job queue; incremental per-site refresh on new telemetry |
+| Frontend | Vanilla SPA | Unchanged API contract; can migrate to a component framework if the team grows |
+| Notifications | In-app toasts | SMS/WhatsApp escalation for unacknowledged critical alarms |

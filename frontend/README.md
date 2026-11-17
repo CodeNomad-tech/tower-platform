@@ -1,42 +1,18 @@
-# Frontend
+# TowerIQ console
 
-Vanilla JavaScript single-page application — **no build step, no
-framework, no bundler**. Served as static files directly by the backend
-(`backend/src/server.js`); just open the backend's URL in a browser.
-
-## Why no React/Vite
-
-The build environment used to create this project had no internet access
-for `npm install`, so a Vite/React toolchain couldn't be installed or
-verified. Rather than deliver an unbuildable, untested frontend, this was
-built on plain browser APIs (`fetch`, `WebSocket`, `Canvas`, hash-based
-routing) and verified serving correctly from a live backend instance. See
-[`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md#why-zero-dependencies)
-for the React migration path — the API/WebSocket contracts this frontend
-consumes don't change if you migrate.
-
-## Structure
+Vanilla JavaScript single-page app with no framework, bundler or build step.
+It is served by the backend from the same origin, so there is no API URL to
+configure.
 
 | Path | Purpose |
 |---|---|
-| `index.html` | Single entry point; loads all scripts in dependency order |
-| `css/styles.css` | Design system (CSS custom properties, dark theme, grid layout) |
-| `js/api.js` | `fetch` wrapper handling auth token + JSON |
-| `js/ws.js` | WebSocket client with auto-reconnect, simple pub/sub for pages to subscribe to live events |
-| `js/charts.js` | Zero-dependency canvas line/bar chart renderer |
-| `js/app.js` | Hash-based router + sidebar shell |
-| `js/pages/*.js` | One module per page: login, dashboard, site detail, alerts, tenancy, reports |
+| `index.html` | Entry point; loads scripts in order (CSP-compatible: no inline script or handlers) |
+| `css/app.css` | Design tokens (dark NOC theme + light theme), layout, components, responsive rules |
+| `js/core.js` | Escaping tagged templates (`h`), formatting, API client (Bearer, authenticated downloads), live WebSocket feed, router and shell, toasts |
+| `js/charts.js` | Theme-aware SVG charts: survival curve, supply timeline, bars, stacked bars |
+| `js/pages/*.js` | Command Center, Sites, Site, Alarms, Resilience Planner, Fuel Integrity, Commercial, Reports, Settings & Demo, Login |
 
-## Routing
-
-Client-side hash routing (`#/`, `#/site/:id`, `#/alerts`, `#/tenancy`,
-`#/reports`, `#/login`) — no server-side route handling needed for page
-navigation, only for the initial static file load.
-
-## Live updates
-
-Every page that shows live data calls `Live.on(callback)` in
-`js/ws.js` to subscribe to WebSocket events, and returns an unsubscribe
-function that's called via a `hashchange` listener when the user
-navigates away — preventing stale listeners from accumulating as you
-move between pages.
+Conventions: every dynamic value goes through `h```, which escapes unless
+wrapped in `raw()`. Pages register teardown with `App.onLeave`, and drop stale
+async results with `App.stale(rid)`. Role-gated controls use `Api.can(role)`;
+the server enforces roles regardless.

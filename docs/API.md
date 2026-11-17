@@ -1,111 +1,114 @@
 # API Reference
 
-## Authentication
+Base URL: `/api`. JSON in and out. Authenticate with `Authorization: Bearer <token>`
+from `POST /auth/login`. Roles: **viewer** (read) < **operator** (alarms,
+deliveries) < **admin** (configuration, users, demo controls). Errors return
+`{ "error": "message" }` with 400 (validation), 401, 403, 404, 409 (conflict),
+413 (body > 256 KB), 429 (login throttled) or 500.
 
-All `/api/*` routes except `/api/auth/login` and `/api/auth/register`
-require a bearer token:
-
-```
-Authorization: Bearer <token>
-```
-
+## Public
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/auth/register` | Create a new user. Body: `{ email, password, role? }`. Password min 8 chars. |
-| POST | `/api/auth/login` | Log in. Body: `{ email, password }`. Returns `{ token, user }`. |
-| POST | `/api/auth/logout` | Invalidate the current session token. |
-| GET | `/api/auth/me` | Returns the current authenticated user. |
+| GET | `/meta` | Product name, version, demo mode flag, simulated-data notice |
+| GET | `/meta/health` | Liveness + ingest counters (accepted/rejected messages) |
+| POST | `/auth/login` | `{ email, password }` → `{ token, expiresAt, user }`. 8 failures per email+IP per 10 min → 429 |
 
-## Sites (infrastructure monitoring)
+## Auth & users
+| Method | Path | Role | Description |
+|---|---|---|---|
+| POST | `/auth/logout` | any | Ends the session |
+| GET | `/auth/me` | any | Current user |
+| GET | `/auth/users` | admin | List users |
+| POST | `/auth/users` | admin | `{ email, password (≥10), role }`. There is no public self-registration |
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/sites` | List all sites with current status. |
-| POST | `/api/sites` | Create a site. Body: `{ id, name, region?, latitude?, longitude?, capacity? }`. |
-| GET | `/api/sites/:id` | Site detail: latest power/fuel/env readings, 24h uptime, tenant count. |
-| GET | `/api/sites/:id/uptime?from=&to=` | Uptime % for an arbitrary date range. |
-| GET | `/api/sites/:id/power-history?from=&to=&source=` | Raw power readings for charting. |
-| GET | `/api/sites/:id/fuel-history?from=&to=` | Raw fuel readings for charting. |
-| GET | `/api/sites/:id/power-utilization?period=daily\|weekly\|monthly\|quarterly\|yearly` | % of time each power source was active. |
+## Sites
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/sites` | viewer | All sites with current supply, fuel %, battery %, tenants, open alarms |
+| POST | `/sites` | admin | `{ id, name, region?, latitude?, longitude?, capacity? }` (id: letters/digits/-/_) |
+| GET | `/sites/:id` | viewer | Detail: assets, latest readings, tenants, switch log, security events, 24 h availability, 30 d SLA, maintenance flags, fuel reconciliation |
+| PUT | `/sites/:id/assets` | admin | Energy asset register (load, battery, solar, tank, generator, nameplate burn, refuel lead time) |
+| GET | `/sites/:id/forecast?loadShedding=` | viewer | Blackout runway (300 runs). Omit `loadShedding` for the learned pattern |
+| GET | `/sites/:id/timeline?hours=24` | viewer | 15-min buckets: majority source (incl. `none`=dark), fuel %, battery %, plus deliveries and theft markers |
+| GET | `/sites/:id/power-utilization?period=daily\|weekly\|monthly\|quarterly\|yearly` | viewer | Share of hours per source incl. `dark`, with data-coverage days |
+| GET | `/sites/:id/uptime?from=&to=` | viewer | Availability % for any range |
+| GET | `/sites/:id/fuel-history?from=&to=` | viewer | Fuel level in 15-min buckets |
 
-## Alerts (alarm management)
+## Resilience Engine
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/resilience/runway?loadShedding=` | viewer | Fleet forecast: risk level, P(dark 24/72 h), median time to dark, act-by, cause, exposure |
+| GET | `/resilience/actions` | viewer | Ranked action queue: `{ kind: restore\|refuel\|capacity\|alarm, priority, title, detail, deadline, valueK, litres, basis }` |
+| GET | `/resilience/plan?loadShedding=&budget=` | viewer | Upgrade planner: per-site baseline and options, funded plan, fleet totals, assumptions |
+| GET | `/resilience/plan.csv?loadShedding=&budget=` | viewer | The ranked plan as CSV |
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/alerts?status=&siteId=` | List alerts, optionally filtered. |
-| POST | `/api/alerts/:id/acknowledge` | Mark an alert acknowledged (records who + when). |
-| POST | `/api/alerts/:id/resolve` | Mark an alert resolved (records who + when). |
-| GET | `/api/alerts/metrics/mttx` | Real mean-time-to-acknowledge / mean-time-to-resolve, computed from alert timestamps. |
+## Alarms
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/alerts?status=open\|new\|acknowledged\|resolved&severity=&siteId=&limit=` | viewer | Alarm list (unresolved first) |
+| POST | `/alerts/:id/acknowledge` | operator | 409 if not `new` |
+| POST | `/alerts/:id/resolve` | operator | `{ note? }`. Also acknowledges if not yet acknowledged |
+| GET | `/alerts/metrics/mttx?days=30` | viewer | Mean time to acknowledge/resolve, open counts by severity |
 
-## Tenancy (commercial intelligence)
+Alarm types: `site_down`, `comms_lost`, `low_fuel`, `fuel_theft`, `smoke`,
+`equipment_health`, `intrusion`, `unauthorized_access`, `sla_breach`.
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/tenancy` | Per-site occupancy %, tenant count, monthly revenue. |
-| GET | `/api/tenancy/opportunities` | Sites with empty capacity, ranked by estimated monthly revenue opportunity. |
-| POST | `/api/tenancy/:siteId/tenants` | Add a tenant. Body: `{ name, contract_value_monthly }`. |
-| DELETE | `/api/tenancy/:siteId/tenants/:tenantId` | Remove a tenant. |
+## Fuel
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/fuel/integrity?days=30` | viewer | Fleet reconciliation and findings |
+| GET | `/fuel/integrity/:siteId?days=` | viewer | One site |
+| GET | `/fuel/deliveries?siteId=` | viewer | Delivery notes |
+| POST | `/fuel/deliveries` | operator | `{ siteId, litres, supplier?, reference? }`. In demo mode the simulated tank receives the fuel |
 
-## SLA
+## Commercial
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/tenancy` | viewer | Per-site tenants, occupancy, revenue, free-slot opportunity, availability, SLA credit exposure; fleet totals incl. tenancy ratio |
+| GET | `/tenancy/opportunities` | viewer | Free slots ranked by opportunity, with "sellable" flag (availability ≥ 99%) |
+| POST | `/tenancy/:siteId/tenants` | admin | `{ name, contract_value_monthly }` (409 at capacity) |
+| DELETE | `/tenancy/:siteId/tenants/:tenantId` | admin | 404 if not found |
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/sla` | Current SLA thresholds per site. |
-| PUT | `/api/sla/:siteId` | Set a site's SLA target. Body: `{ target_uptime_pct }`. |
+## Reports
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET | `/reports/sla?periodDays=` or `?period=daily…yearly` | viewer | Automated SLA report |
+| GET | `/reports/sla/breaches` | viewer | Recorded breaches (background job) |
+| GET | `/reports/utilization?period=` | viewer | Fleet + per-site source utilisation |
+| GET | `/reports/predictive-maintenance` | viewer | Current significant trends |
+| GET | `/reports/executive-summary` | viewer | Fleet KPIs |
+| GET | `/reports/export/sla.csv`, `/alerts.csv`, `/fuel.csv` | viewer | CSV exports (formula-injection safe) |
 
-## Reports & analytics
+## Settings, SLA, demo
+| Method | Path | Role | Description |
+|---|---|---|---|
+| GET / PUT | `/settings` | viewer / admin | Business assumptions (validated ranges) |
+| POST / GET | `/settings/device-keys` | admin | Create (key shown once) / list camera-node keys |
+| GET | `/settings/audit` | admin | Audit log |
+| GET / PUT | `/sla`, `/sla/:siteId` | viewer / admin | Per-site availability targets (90–100%) |
+| GET | `/demo/status` | viewer | Simulator state (demo mode) |
+| POST | `/demo/scenario` | admin | `{ siteId, action: outage\|restore\|siphon\|intrusion\|smoke, hours?, litres? }` |
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/reports/sla?periodDays=30` | SLA compliance report across all sites for a period. |
-| GET | `/api/reports/sla/breaches` | Historical SLA breach log. |
-| GET | `/api/reports/predictive-maintenance` | Current predictive-maintenance flags with explanations. |
-| GET | `/api/reports/executive-summary` | Fleet-wide KPIs for the executive dashboard. |
-| GET | `/api/reports/export/uptime.csv` | Downloadable uptime report. |
-| GET | `/api/reports/export/alerts.csv` | Downloadable alert log. |
+## WebSocket `/ws`
+* Console: `/ws?token=<session token>`. It receives JSON events with `channel`:
+  `heartbeat`, `status`, `power`, `battery`, `fuel`, `generator`, `env`,
+  `security`, `switch`, `alert`, `maintenance`, `forecast`.
+* Device: `/ws?device=<device key>`. It receives `{type:'hello', sites}` and may
+  send `{ type: 'camera-event', siteId, event_type: 'motion'|'intrusion'|'unauthorized_access', confidence }`.
+* No credentials → HTTP 401 during the handshake.
 
-## WebSocket (`/ws`)
+## MQTT device contract (port 1883)
 
-Connect to `ws://<host>/ws` (or `wss://` behind TLS). No auth handshake
-is required for the socket itself (the dashboard already required an
-authenticated session to load); every message is a JSON object.
+| Topic | Payload |
+|---|---|
+| `sites/{siteId}/heartbeat` | `{ powered?: bool }` (false = site dark; default true) |
+| `sites/{siteId}/power` | `{ source: grid\|solar\|battery\|generator, active: bool, voltage?, output_watts? }`, one message per source |
+| `sites/{siteId}/battery` | `{ soc_pct: 0–100, voltage? }` |
+| `sites/{siteId}/fuel` | `{ level_pct: 0–100, generator_on: bool }` |
+| `sites/{siteId}/generator` | `{ event: start\|stop }` |
+| `sites/{siteId}/env` | `{ temperature_c?, smoke_detected, door_open, motion_detected }` |
+| `sites/{siteId}/security` | `{ event_type, source, confidence? 0–1 }` |
 
-**Server → client** events (all share a `channel` field):
-
-```jsonc
-{ "channel": "heartbeat", "siteId": "site-001" }
-{ "channel": "power", "siteId": "site-001", "payload": { "source": "solar", "active": true, "voltage": 221.4, "output_watts": 812 } }
-{ "channel": "fuel", "siteId": "site-001", "payload": { "level_pct": 42.1, "generator_on": false } }
-{ "channel": "env", "siteId": "site-001", "payload": { "temperature_c": 31.2, "smoke_detected": false, "door_open": false, "motion_detected": true } }
-{ "channel": "security", "siteId": "site-001", "payload": { "event_type": "motion", "source": "pir", "confidence": 0.87 } }
-{ "channel": "alert", "siteId": "site-001", "alert": { "id": 12, "type": "low_fuel", "severity": "warning", "message": "...", "status": "new" } }
-{ "channel": "sla", "siteId": "site-001", "result": { "actualPct": 98.2, "targetPct": 99.5, "breached": true } }
-{ "channel": "maintenance", "siteId": "site-001", "flag": { "component": "generator", "trendSlope": 4.1, "explanation": "..." } }
-```
-
-**Client → server** (used by the phone camera node, which can't speak
-raw MQTT from a browser):
-
-```jsonc
-{ "type": "camera-event", "siteId": "site-001", "event_type": "motion" | "intrusion", "confidence": 0.91 }
-```
-
-## MQTT topic schema (device ↔ backend)
-
-Any device — Wokwi ESP32, the fleet simulator, or real future hardware —
-publishes to these topics against the embedded broker on port `1883`
-(configurable via `MQTT_PORT`):
-
-| Topic | Payload | Published by |
-|---|---|---|
-| `sites/{siteId}/heartbeat` | `{}` | any device, periodically, to signal "I'm alive" |
-| `sites/{siteId}/power` | `{ source: "grid"\|"solar"\|"generator", active: bool, voltage: number, output_watts: number }` | one message per source per tick |
-| `sites/{siteId}/fuel` | `{ level_pct: number, generator_on: bool }` | |
-| `sites/{siteId}/generator` | `{ event: "start" \| "stop" }` | on state transitions only |
-| `sites/{siteId}/env` | `{ temperature_c: number, smoke_detected: bool, door_open: bool, motion_detected: bool }` | |
-| `sites/{siteId}/security` | `{ event_type: "motion"\|"intrusion"\|"unauthorized_access", source: string, confidence: number }` | |
-
-This is the contract a real device must follow to be indistinguishable
-from the simulator — see `hardware-simulation/wokwi/sketch.ino` for a
-reference implementation, and `backend/src/simulators/fleetSimulator.js`
-for the simulated fleet using the identical schema.
+Messages for unknown sites, or with out-of-range values, are rejected and
+counted in `/meta/health`. A vendor adapter for `infratel/tower/{TWR-xxx}/telemetry|events|status`
+maps into the same channels (see `mqtt/ingest.js`).

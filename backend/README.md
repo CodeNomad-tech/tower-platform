@@ -1,34 +1,26 @@
-# Backend
+# TowerIQ backend
 
-Node.js API server, embedded MQTT broker, rule engines, and fleet
-simulator. **Zero runtime dependencies** — see
-[`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md#why-zero-dependencies).
-
-## Run
+One Node.js process (22.5+), **zero runtime dependencies**: REST API, static
+console, authenticated WebSocket, embedded MQTT broker, telemetry ingest, the
+engines, and (in demo mode) the fleet simulator.
 
 ```bash
-npm start        # production-style start
-npm run dev       # auto-restart on file changes (node --watch)
-npm test          # run the test suite
-npm run seed       # manually (re-)run the demo data seed
+npm start            # serve on :3000 (MQTT :1883)
+npm run dev          # restart on file changes
+npm test             # 36 tests (node:test)
+npm run demo:reset   # wipe demo DB; next start regenerates simulated history
+npm run create-admin -- you@example.com   # production (DEMO_MODE=false)
 ```
-
-Requires Node.js 22.5+.
-
-## Directory guide
 
 | Path | Purpose |
 |---|---|
-| `src/server.js` | Entry point — wires HTTP, MQTT broker, WebSocket hub, ingest, and background jobs together |
-| `src/db/` | SQLite schema (`schema.sql`), connection wrapper (`index.js`), demo data seed (`seed.js`) |
-| `src/mqtt/` | Hand-rolled MQTT broker (`broker.js`) and client (`client.js`); telemetry ingest bridge (`ingest.js`) |
-| `src/ws/` | Hand-rolled WebSocket server (`hub.js`) |
-| `src/http/` | Minimal router (`router.js`) and REST route modules (`routes/`) |
-| `src/auth/` | Registration, login, session middleware |
-| `src/engine/` | Rule engine (alerts), SLA engine (uptime/breach calc), predictive maintenance engine (trend analysis) |
-| `src/simulators/` | Fleet telemetry simulator |
-| `tests/` | `node:test`-based unit and integration tests |
+| `src/server.js` | Wiring, static files (CSP), WebSocket auth, background jobs |
+| `src/config.js`, `src/settings.js` | Runtime config (env) and editable business assumptions |
+| `src/db/` | Schema, connection, demo catalog/seed, simulated-history generator |
+| `src/engine/` | `powerModel` (digital twin), `gridModel`, `resilience`, `fuelIntegrity`, `predictiveEngine`, `ruleEngine`, `slaEngine` |
+| `src/mqtt/`, `src/ws/` | Broker/client, ingest with validation; WebSocket hub |
+| `src/http/`, `src/auth/` | Router + routes; sessions, roles, throttling, audit |
+| `src/simulators/` | Real-time fleet simulator + demo scenario controls |
+| `tests/` | Engine unit tests and API integration tests |
 
-See [`../docs/API.md`](../docs/API.md) for the full endpoint and MQTT
-topic reference, and [`../docs/DATABASE.md`](../docs/DATABASE.md) for the
-schema.
+See `../docs/ARCHITECTURE.md` and `../docs/API.md`. Environment variables: `.env.example`.

@@ -1,5 +1,5 @@
 /*
- * Smart Tower Monitoring Platform — Wokwi hardware simulation node
+ * TowerIQ: Wokwi hardware simulation node
  * ------------------------------------------------------------------
  * Runs on a simulated ESP32 in Wokwi (https://wokwi.com), using REAL
  * firmware (this file) and REAL WiFi + MQTT — not a mockup. Wokwi's
@@ -38,7 +38,7 @@ const char* WIFI_SSID = "Wokwi-GUEST";   // Wokwi's built-in simulated WiFi netw
 const char* WIFI_PASS = "";
 const char* MQTT_HOST = "test.mosquitto.org";  // swap for your deployed broker — see note above
 const int   MQTT_PORT = 1883;
-const char* SITE_ID   = "site-wokwi-01";
+const char* SITE_ID   = "WOKWI-01";   // register this site first: Sites API (admin) POST /api/sites {"id":"WOKWI-01","name":"Wokwi bench node"}
 
 #define DHT_PIN 4
 #define PIR_PIN 5
@@ -112,7 +112,8 @@ void loop() {
   digitalWrite(GEN_LED_PIN, generatorOn ? HIGH : LOW);
 
   // --- Publish telemetry using the SAME topic/payload schema as the fleet simulator ---
-  publishJson("heartbeat", "{\"ts\":" + String(now) + "}");
+  // powered=true: this node is mains/battery powered; a real RMS reports false when the site is dark.
+  publishJson("heartbeat", "{\"powered\":true}");
 
   publishJson("env", "{\"temperature_c\":" + String(isnan(tempC) ? 25.0 : tempC, 1) +
                       ",\"smoke_detected\":false" +
