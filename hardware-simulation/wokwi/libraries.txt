@@ -1,0 +1,7 @@
+# Libraries required for sketch.ino, installed automatically by Wokwi
+# when you open this project at wokwi.com and add them via the Library Manager,
+# or by including this file's contents in your Wokwi project's library list.
+
+DHT sensor library     # by Adafruit — DHT22 temperature readings
+Adafruit Unified Sensor # dependency of the DHT library
+PubSubClient            # by Nick O'Leary — MQTT client for Arduino/ESP32

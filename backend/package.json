@@ -1,0 +1,18 @@
+{
+  "name": "tower-platform-backend",
+  "version": "1.0.0",
+  "description": "Smart Tower Monitoring & Infrastructure Intelligence Platform — backend (zero external runtime dependencies by design; see docs/ARCHITECTURE.md)",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node --experimental-sqlite src/server.js",
+    "dev": "node --experimental-sqlite --watch src/server.js",
+    "seed": "node --experimental-sqlite src/db/seed.js",
+    "test": "node --experimental-sqlite --test --test-force-exit tests/*.test.js"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "license": "MIT"
+}
