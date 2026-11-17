@@ -70,7 +70,13 @@ function parseJsonBody(req) {
     const chunks = [];
     req.on('data', (c) => {
       size += c.length;
-      if (size > config.MAX_BODY_BYTES) { reject(new HttpError(413, 'Request body too large')); req.destroy(); return; }
+      if (size > config.MAX_BODY_BYTES) {
+        // Answer 413 and discard the rest (destroying the socket would reset the connection before the reply).
+        req.removeAllListeners('data');
+        req.resume();
+        reject(Object.assign(new HttpError(413, 'Request body too large'), { closeConnection: true }));
+        return;
+      }
       chunks.push(c);
     });
     req.on('end', () => {
@@ -90,7 +96,7 @@ function sendError(res, err) {
   const status = err.status || 500;
   if (status >= 500) console.error('[http] error:', err);
   if (!res.headersSent) {
-    res.writeHead(status, { 'Content-Type': 'application/json' });
+    res.writeHead(status, { 'Content-Type': 'application/json', ...(err.closeConnection ? { Connection: 'close' } : {}) });
     res.end(JSON.stringify({ error: status >= 500 ? 'Internal server error' : err.message }));
   }
 }

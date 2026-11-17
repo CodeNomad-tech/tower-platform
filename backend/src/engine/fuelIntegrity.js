@@ -64,12 +64,14 @@ function reconcileSite(siteId, days = 30) {
     const dtMin = (db.tsToMs(c.ts) - db.tsToMs(p.ts)) / 60000;
     if (dtMin <= 0 || dtMin > 20) continue;
     const dropL = ((p.level_pct - c.level_pct) / 100) * tank;
-    if (dropL <= 0) continue;
+    if (dropL < -1) continue; // refuel
     if (!p.generator_on && !c.generator_on) {
       if (dropL >= Math.max(40, tank * 0.08)) events.push({ ts: c.ts, litres: Math.round(dropL), valueK: Math.round(dropL * price), kind: 'sudden_drop' });
-      else gradualOffL += dropL;
+      else if (dropL > 0) gradualOffL += dropL;
     } else if (p.generator_on && c.generator_on) {
-      burnWhileOnL += dropL;
+      // Count every running interval, including those where the gauge didn't move
+      // (sensor resolution); otherwise the measured rate is biased upwards.
+      burnWhileOnL += Math.max(0, dropL);
       hoursOn += dtMin / 60;
     }
   }
