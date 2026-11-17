@@ -353,3 +353,11 @@ details.more > summary::-webkit-details-marker { display: none; }
 details.more > summary::before { content: '▸ '; }
 details.more[open] > summary::before { content: '▾ '; }
 details.more > summary:hover { color: var(--text); border-color: var(--text-3); }
+.answer { font-size: 17px; line-height: 1.6; }
+.plan-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.plan-row.unfunded { opacity: 0.6; }
+.plan-rank { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: var(--panel-2); border: 1px solid var(--line-2); }
+.plan-main { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.plan-nums { display: flex; gap: 22px; text-align: right; }
+.plan-nums > div { display: flex; flex-direction: column; }
+@media (max-width: 860px) { .plan-row { grid-template-columns: 32px 1fr; } .plan-nums { grid-column: 1 / -1; justify-content: space-between; text-align: left; } }
