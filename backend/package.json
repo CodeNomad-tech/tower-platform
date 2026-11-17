@@ -1,16 +1,16 @@
 {
-  "name": "tower-platform-backend",
-  "version": "1.0.0",
-  "description": "Smart Tower Monitoring & Infrastructure Intelligence Platform — backend (zero external runtime dependencies by design; see docs/ARCHITECTURE.md)",
+  "name": "toweriq-backend",
+  "version": "2.0.0",
+  "description": "TowerIQ: load-shedding-aware tower monitoring & resilience intelligence. Zero runtime dependencies (Node.js built-ins only).",
   "main": "src/server.js",
-  "engines": {
-    "node": ">=22.5.0"
-  },
+  "private": true,
+  "engines": { "node": ">=22.5.0" },
   "scripts": {
     "start": "node --experimental-sqlite src/server.js",
     "dev": "node --experimental-sqlite --watch src/server.js",
-    "seed": "node --experimental-sqlite src/db/seed.js",
-    "test": "node --experimental-sqlite --test --test-force-exit tests/*.test.js"
+    "demo:reset": "node scripts/reset-demo.js",
+    "create-admin": "node --experimental-sqlite scripts/create-admin.js",
+    "test": "node --experimental-sqlite --test --test-force-exit --test-concurrency=1 tests/"
   },
   "dependencies": {},
   "devDependencies": {},

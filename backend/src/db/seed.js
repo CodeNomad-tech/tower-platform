@@ -1,56 +1,57 @@
 'use strict';
 /**
- * Idempotent seed script — creates demo sites, an admin user, and sample
- * tenants if they don't already exist. Run automatically on first boot.
+ * Demo-mode seed: simulated sites, assets, tenants, SLA targets, a demo admin,
+ * and 30 days of simulated history. Idempotent: does nothing if sites exist.
+ * In production (DEMO_MODE=false) nothing is seeded and an admin is created
+ * with `npm run create-admin`.
  */
 
 const db = require('./index');
-const { hashPassword } = require('../auth/auth');
+const config = require('../config');
+const { SITES } = require('./catalog');
+const { generateHistory } = require('./history');
 
-const DEMO_SITES = [
-  { id: 'site-001', name: 'Lusaka Central Tower', region: 'Lusaka', latitude: -15.3875, longitude: 28.3228, capacity: 6 },
-  { id: 'site-002', name: 'Ndola Industrial Site', region: 'Copperbelt', latitude: -12.9587, longitude: 28.6366, capacity: 5 },
-  { id: 'site-003', name: 'Livingstone Border Relay', region: 'Southern', latitude: -17.8419, longitude: 25.8544, capacity: 4 },
-  { id: 'site-004', name: 'Kitwe Highway Node', region: 'Copperbelt', latitude: -12.8024, longitude: 28.2132, capacity: 5 },
-];
+function seed({ withHistory = true, log = console.log } = {}) {
+  if (!config.DEMO_MODE) return { seeded: false };
+  const { hashPassword } = require('../auth/passwords');
 
-function seed() {
-  for (const site of DEMO_SITES) {
-    const exists = db.get('SELECT id FROM sites WHERE id = ?', [site.id]);
-    if (!exists) {
-      db.run(
-        'INSERT INTO sites (id, name, region, latitude, longitude, capacity, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [site.id, site.name, site.region, site.latitude, site.longitude, site.capacity, 'unknown']
-      );
-      db.run('INSERT INTO sla_thresholds (site_id, target_uptime_pct) VALUES (?, 99.5)', [site.id]);
-      db.run('INSERT INTO status_log (site_id, status) VALUES (?, \'online\')', [site.id]);
-    }
-  }
-
-  // Sample tenants (commercial intelligence module)
-  const tenantCount = db.get('SELECT COUNT(*) as c FROM tenants').c;
-  if (tenantCount === 0) {
-    const sample = [
-      ['site-001', 'MTN Zambia', 4200], ['site-001', 'Airtel Zambia', 3800], ['site-001', 'Zamtel', 3100],
-      ['site-002', 'MTN Zambia', 4200], ['site-002', 'Airtel Zambia', 3800],
-      ['site-003', 'Zamtel', 3100],
-      ['site-004', 'MTN Zambia', 4200], ['site-004', 'Airtel Zambia', 3800], ['site-004', 'Zamtel', 3100],
-    ];
-    for (const [siteId, name, value] of sample) {
-      db.run('INSERT INTO tenants (site_id, name, contract_value_monthly) VALUES (?, ?, ?)', [siteId, name, value]);
-    }
-  }
-
-  // Default admin user for demo purposes — CHANGE THIS PASSWORD before any real deployment
-  const admin = db.get('SELECT id FROM users WHERE email = ?', ['admin@towerplatform.demo']);
+  let admin = db.get('SELECT id FROM users WHERE email = ?', [config.DEMO_ADMIN_EMAIL]);
   if (!admin) {
-    const { hash, salt } = hashPassword('ChangeMe123!');
-    db.run(
-      'INSERT INTO users (email, password_hash, password_salt, role) VALUES (?, ?, ?, ?)',
-      ['admin@towerplatform.demo', hash, salt, 'admin']
-    );
-    console.log('[seed] created demo admin user: admin@towerplatform.demo / ChangeMe123!  (change this before real deployment)');
+    const { hash, salt } = hashPassword(config.DEMO_ADMIN_PASSWORD);
+    const r = db.run('INSERT INTO users (email, password_hash, password_salt, role) VALUES (?, ?, ?, ?)',
+      [config.DEMO_ADMIN_EMAIL, hash, salt, 'admin']);
+    admin = { id: Number(r.lastInsertRowid) };
+    for (const [email, role] of [['operator@toweriq.demo', 'operator'], ['viewer@toweriq.demo', 'viewer']]) {
+      const p = hashPassword(config.DEMO_ADMIN_PASSWORD);
+      db.run('INSERT OR IGNORE INTO users (email, password_hash, password_salt, role) VALUES (?, ?, ?, ?)', [email, p.hash, p.salt, role]);
+    }
+    log(`[seed] demo users created (admin/operator/viewer @toweriq.demo). Password from DEMO_ADMIN_PASSWORD.`);
   }
+
+  const existing = db.get('SELECT COUNT(*) AS c FROM sites').c;
+  if (existing > 0) return { seeded: false };
+
+  db.tx(() => {
+    for (const s of SITES) {
+      db.run('INSERT INTO sites (id, name, region, latitude, longitude, capacity, status, simulated) VALUES (?, ?, ?, ?, ?, ?, ?, 1)',
+        [s.id, s.name, s.region, s.latitude, s.longitude, s.capacity, 'unknown']);
+      const a = s.assets;
+      db.run(`INSERT INTO site_assets (site_id, load_kw, battery_kwh, solar_kw, tank_l, gen_kw, gen_burn_lph, grid_profile, refuel_lead_h)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [s.id, a.load_kw, a.battery_kwh, a.solar_kw, a.tank_l, a.gen_kw, a.gen_burn_lph, a.grid_profile, a.refuel_lead_h]);
+      db.run('INSERT INTO sla_thresholds (site_id, target_uptime_pct) VALUES (?, 99.5)', [s.id]);
+      for (const [name, value] of s.tenants) {
+        db.run(`INSERT INTO tenants (site_id, name, contract_value_monthly, start_date) VALUES (?, ?, ?, datetime('now', '-400 days'))`, [s.id, name, value]);
+      }
+    }
+  });
+
+  if (withHistory) {
+    const t0 = Date.now();
+    generateHistory(SITES, config.HISTORY_DAYS, { adminUserId: admin.id });
+    log(`[seed] generated ${config.HISTORY_DAYS} days of SIMULATED history for ${SITES.length} sites in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  }
+  return { seeded: true };
 }
 
 if (require.main === module) {
@@ -58,4 +59,4 @@ if (require.main === module) {
   console.log('[seed] done');
 }
 
-module.exports = { seed, DEMO_SITES };
+module.exports = { seed };
